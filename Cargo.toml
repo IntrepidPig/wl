@@ -1,0 +1,7 @@
+[workspace]
+members = [
+	"wl_common",
+	"wl_scanner",
+	"wl_protocol",
+	"xdg_shell_protocol",
+]

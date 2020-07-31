@@ -1,0 +1,12 @@
+[package]
+name = "wl_scanner"
+version = "0.1.0"
+authors = ["intrepidpig"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+wl_common = { path = "../wl_common" }
+quick-xml = "0.18.1"
+thiserror = "1.0.20"

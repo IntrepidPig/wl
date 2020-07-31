@@ -1,0 +1,13 @@
+[package]
+name = "wl_protocol"
+version = "0.1.0"
+authors = ["intrepidpig"]
+edition = "2018"
+
+[dependencies]
+wl_common = { path = "../wl_common" }
+bitflags = "^1.2.1"
+byteorder = "^1.3.4"
+
+[build_dependencies]
+wl_scanner = { path = "../wl_scanner" }

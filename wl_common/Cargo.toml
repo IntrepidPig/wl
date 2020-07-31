@@ -1,0 +1,11 @@
+[package]
+name = "wl_common"
+version = "0.1.0"
+authors = ["intrepidpig"]
+edition = "2018"
+
+[dependencies]
+byteorder = "^1.3.4"
+thiserror = "^1.0.20"
+graph_storage = { path = "../../graph_storage" }
+log = "0.4.8"
