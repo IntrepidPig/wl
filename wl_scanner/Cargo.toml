@@ -8,5 +8,7 @@ edition = "2018"
 
 [dependencies]
 wl_common = { path = "../wl_common" }
+quote = "1.0"
+proc-macro2 = "1.0"
 quick-xml = "0.18.1"
 thiserror = "1.0.20"

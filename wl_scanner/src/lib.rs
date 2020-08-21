@@ -13,8 +13,6 @@ use thiserror::Error;
 pub enum GenerationError {
 	#[error(transparent)]
 	ParseError(#[from] scanner::ProtocolParseError),
-	#[error(transparent)]
-	GenerationError(#[from] generator::ProtocolGenError),
 }
 
 pub fn generate_api(protocol: &str) -> Result<String, GenerationError> {
@@ -22,7 +20,7 @@ pub fn generate_api(protocol: &str) -> Result<String, GenerationError> {
 	reader.trim_text(true);
 	let mut buf = Vec::new();
 	let desc = scanner::parse_protocol(&mut reader, &mut buf)?;
-	let api = generator::generate_api(&desc)?;
+	let api = generator::generate_api(&desc);
 	Ok(api)
 }
 

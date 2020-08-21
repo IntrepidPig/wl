@@ -25,9 +25,8 @@ pub struct InterfaceDesc {
 }
 
 #[derive(Debug)]
-pub struct RequestDesc {
+pub struct MessageDesc {
 	pub name: String,
-	pub destructor: bool,
 	pub since: Option<i32>,
 	pub description: String,
 	pub summary: String,
@@ -35,12 +34,14 @@ pub struct RequestDesc {
 }
 
 #[derive(Debug)]
+pub struct RequestDesc {
+	pub message: MessageDesc,
+	pub destructor: bool,
+}
+
+#[derive(Debug)]
 pub struct EventDesc {
-	pub name: String,
-	pub since: Option<i32>,
-	pub description: String,
-	pub summary: String,
-	pub arguments: Vec<ArgumentDesc>,
+	pub message: MessageDesc,
 }
 
 #[derive(Debug)]
@@ -382,12 +383,14 @@ fn read_request(node: Node) -> Result<RequestDesc, ProtocolParseError> {
 	let (description, summary) = description.ok_or(ProtocolParseError::InvalidXmlError(String::from("Request was missing 'description' element")))?;
 	
 	let request_desc = RequestDesc {
-	    name,
-	    destructor,
-	    since,
-	    description,
-	    summary,
-	    arguments,
+		message: MessageDesc {
+			name,
+			since,
+			description,
+			summary,
+			arguments,
+		},
+		destructor,
 	};
 	Ok(request_desc)
 }
@@ -492,11 +495,13 @@ fn read_event(node: Node) -> Result<EventDesc, ProtocolParseError> {
 	let (description, summary) = description.ok_or(ProtocolParseError::InvalidXmlError(String::from("Event was missing 'description' element")))?;
 	
 	let event_desc = EventDesc {
-	    name,
-	    since,
-	    description,
-	    summary,
-	    arguments,
+		message: MessageDesc {
+			name,
+			since,
+			description,
+			summary,
+			arguments,
+		},
 	};
 	Ok(event_desc)
 }
