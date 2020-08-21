@@ -41,6 +41,10 @@ impl<I> Resource<I> {
 		self.object.clone()
 	}
 
+	pub fn is(&self, other: Resource<I>) -> bool {
+		self.object.is(other.object)
+	}
+
 	// TODO: returning a handle is not ideal because it does not convey that there is
 	// guaranteed to be a resource behind the handle, and an unwrap will usually follow.
 	pub fn get_data<T: 'static>(&self) -> Option<Handle<T>> {
