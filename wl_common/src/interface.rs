@@ -1,11 +1,9 @@
 use std::{
 	borrow::{Cow},
-	ffi::{CStr, CString}
 };
 
 use crate::{
-	wire::{RawMessage, RawMessageReader, ArgumentType, ArgumentDesc, DynArgument, DynArgumentReader, DynMessage, ArgumentError},
-	resource::{ResourceManager, Resource, ClientHandle, AddObjectError},
+	wire::{ArgumentDesc, DynArgument, ArgumentError},
 };
 
 use thiserror::Error;
@@ -17,7 +15,7 @@ pub trait Interface {
 	type Event: Message;
 
 	const NAME: &'static str;
-	const VERSION: u32;
+	const VERSION: u32; // TODO: the version is specific to the object, so this is only represents the max server supported version of this interface
 	const REQUESTS: MessagesDesc;
 	const EVENTS: MessagesDesc;
 
@@ -38,6 +36,21 @@ pub trait Interface {
 	}
 }
 
+pub trait InterfaceDebug {
+	fn name(&self) -> &str;
+	fn version(&self) -> u32;
+}
+
+impl<I: Interface> InterfaceDebug for I {
+    fn name(&self) -> &str {
+        I::NAME
+    }
+    fn version(&self) -> u32 {
+        I::VERSION
+    }
+	
+}
+
 pub const ANONYMOUS_NAME: &'static str = "anonymous";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +59,15 @@ pub struct DynInterface {
 	pub version: u32,
 	pub requests: MessagesDesc,
 	pub events: MessagesDesc,
+}
+
+impl InterfaceDebug for DynInterface {
+    fn name(&self) -> &str {
+        self.name.as_ref()
+    }
+    fn version(&self) -> u32 {
+        self.version
+    }
 }
 
 impl DynInterface {
@@ -89,10 +111,24 @@ impl InterfaceTitle {
 	}
 }
 
+#[derive(Debug, Error)]
+pub enum AddObjectError {
+	#[error("Tried to add an object to a client that doesn't exist")]
+	ClientDoesntExist,
+	#[error("Tried to add an object to a client but the id was already taken")]
+	IdAlreadyTaken,
+	#[error("Another object with the same already already exists with a different interface")]
+	InterfaceMismatch,
+}
+
 pub trait Message {
+	type ClientMap;
+
 	fn opcode(&self) -> u16;
-	fn from_args(resources: &mut ResourceManager, client_handle: ClientHandle, opcode: u16, args: Vec<DynArgument>) -> Result<Self, FromArgsError> where Self: Sized;
-	fn into_args(&self, resources: &ResourceManager, client_handle: ClientHandle) -> Result<(u16, Vec<DynArgument>), IntoArgsError>;
+
+	fn from_args(client_map: Self::ClientMap, opcode: u16, args: Vec<DynArgument>) -> Result<Self, FromArgsError> where Self: Sized;
+
+	fn into_args(&self, client_map: Self::ClientMap) -> Result<(u16, Vec<DynArgument>), IntoArgsError>;
 }
 
 #[derive(Debug, Error)]
@@ -121,47 +157,6 @@ pub enum IntoArgsError {
 	Other(String),
 }
 
-pub enum NoMessage { }
-impl Message for NoMessage {
-	fn opcode(&self) -> u16 {
-		panic!("Cannot get NoMessage opcode");
-	}
-
-	fn from_args(_resources: &mut ResourceManager, _client_handle: ClientHandle, _opcode: u16, _args: Vec<DynArgument>) -> Result<Self, FromArgsError> {
-		panic!("Cannot read NoMessage");
-	}
-
-	fn into_args(&self, _resources: &ResourceManager, _client_handle: ClientHandle) -> Result<(u16, Vec<DynArgument>), IntoArgsError> {
-		panic!("Cannot convert NoMessage to arguments");
-	}
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error("Got an invalid enum value")]
 pub struct InvalidEnumValue;
-
-pub struct ProtocolRegistry {
-	interfaces: Vec<DynInterface>,
-}
-
-impl ProtocolRegistry {
-	pub fn new() -> Self {
-		Self {
-			interfaces: Vec::new(),
-		}
-	}
-
-	pub fn register_protocol(&mut self, protocol: &[DynInterface]) {
-		for interface in protocol {
-			self.register_interface(interface.clone())
-		}
-	}
-
-	pub fn register_interface(&mut self, interface: DynInterface) {
-		self.interfaces.push(interface);
-	}
-
-	pub fn find_interface(&self, title: InterfaceTitle) -> Option<DynInterface> {
-		self.interfaces.iter().find(|interface| interface.name == title.name && interface.version == title.version).cloned()
-	}
-}

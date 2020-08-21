@@ -7,8 +7,7 @@ use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
 use thiserror::Error;
 
 use crate::{
-	protocol::{Interface, DynInterface, Message, ProtocolRegistry, InterfaceTitle},
-	resource::{Resource, ResourceManager, Untyped, ClientHandle, AddObjectError},
+	interface::{Message, InterfaceTitle},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,6 +123,13 @@ impl<'a, 'b> RawMessageReader<'a, 'b> {
 		self.next_uint()
 	}
 
+	pub fn next_new_id_anonymous(&mut self) -> Result<(u32, InterfaceTitle), ParseRawError> {
+		let name = String::from_utf8(self.next_string()?.unwrap()).unwrap(); // TODO treat non-utf8 properly, i.e., use CString instead
+		let version = self.next_uint()?;
+		let id = self.next_uint()?;
+		Ok((id, InterfaceTitle::new(name, version)))
+	}
+
 	pub fn next_array(&mut self) -> Result<Vec<u8>, ParseRawError> {
 		let len = self.next_uint()?;
 		let mut buf = Vec::new();
@@ -165,16 +171,16 @@ impl DynMessage {
 		}
 	}
 
-	pub fn from_raw(resources: &mut ResourceManager, client: ClientHandle, args_desc: &[ArgumentDesc], reader: RawMessageReader) -> Result<Self, ParseRawError> {
+	pub fn from_raw(args_desc: &[ArgumentDesc], reader: RawMessageReader) -> Result<Self, ParseRawError> {
 		Ok(Self {
 			sender: reader.header.sender,
 			opcode: reader.header.opcode,
-			arguments: Self::parse_dyn_args(resources, client, args_desc, reader)?,
+			arguments: Self::parse_dyn_args(args_desc, reader)?,
 		})
 	}
 
-	pub fn into_raw(&self, resources: &ResourceManager) -> Result<RawMessage, SerializeRawError> {
-		let (data, fds) = Self::serialize_raw_args(resources, &self.arguments)?;
+	pub fn into_raw(&self) -> Result<RawMessage, SerializeRawError> {
+		let (data, fds) = Self::serialize_raw_args(&self.arguments)?;
 		Ok(RawMessage {
 		    header: MessageHeader {
 		        sender: self.sender,
@@ -186,7 +192,7 @@ impl DynMessage {
 		})
 	}
 
-	pub fn serialize_raw_args(resources: &ResourceManager, args: &[DynArgument]) -> Result<(Vec<u8>, Vec<RawFd>), SerializeRawError> {
+	pub fn serialize_raw_args(args: &[DynArgument]) -> Result<(Vec<u8>, Vec<RawFd>), SerializeRawError> {
 		let mut buf = Vec::new();
 		let mut fds = Vec::new();
 
@@ -215,19 +221,17 @@ impl DynMessage {
 					// a length of at least 1 due to the null terminator
 					buf.write_u32::<NativeEndian>(0u32).unwrap();
 				}
-			    DynArgument::Object(ref v) => if let Some(v) = v {
-					let id = resources.get_object_info_untyped(&v.to_untyped()).ok_or(SerializeRawError::ObjectDoesntExist)?.id;
-					buf.write_u32::<NativeEndian>(id).unwrap();
+			    DynArgument::Object(v) => if let Some(v) = v {
+					buf.write_u32::<NativeEndian>(v).unwrap();
 				} else {
 					buf.write_u32::<NativeEndian>(0).unwrap();
 				}
-			    DynArgument::NewId(ref v, ref interface) => {
+			    DynArgument::NewId(v, ref interface) => {
 					if let Some(interface) = interface {
 						let c_name = std::ffi::CString::new(interface.name.as_bytes()).unwrap();
 						write_array(&mut buf, c_name.as_bytes_with_nul())?;
 					}
-					let id = resources.get_object_info_untyped(&v).ok_or(SerializeRawError::ObjectDoesntExist)?.id;
-					buf.write_u32::<NativeEndian>(id).unwrap();
+					buf.write_u32::<NativeEndian>(v).unwrap();
 				}
 			    DynArgument::Array(ref v) => write_array(&mut buf, v)?,
 			    DynArgument::Fd(v) => fds.push(v),
@@ -236,7 +240,7 @@ impl DynMessage {
 		Ok((buf, fds))
 	}
 
-	pub fn parse_dyn_args(resources: &mut ResourceManager, client: ClientHandle, args_desc: &[ArgumentDesc], mut reader: RawMessageReader) -> Result<Vec<DynArgument>, ParseRawError> {
+	pub fn parse_dyn_args(args_desc: &[ArgumentDesc], mut reader: RawMessageReader) -> Result<Vec<DynArgument>, ParseRawError> {
 		let mut args = Vec::new();
 		for arg_desc in args_desc {
 			match arg_desc.arg_type {
@@ -245,24 +249,16 @@ impl DynMessage {
 			    ArgumentType::Fixed => args.push(DynArgument::Fixed(reader.next_fixed()?)),
 			    ArgumentType::String => args.push(DynArgument::String(reader.next_string()?)),
 			    ArgumentType::Object => {
-					let next_object = reader.next_object()?
-						.map(|id| resources.find_resource_dyn(client, id).ok_or(ParseRawError::ObjectDoesntExist))
-						.transpose()?;
-					args.push(DynArgument::Object(next_object.map(|resource| resource.to_untyped())))
+					let next_object = reader.next_object()?;
+					args.push(DynArgument::Object(next_object))
 				},
 			    ArgumentType::NewId => {
-					if let Some(ref interface) = arg_desc.interface {
-						let id = reader.next_uint()?;
-						let resource = resources.add_object_dyn(client, id, DynInterface::new_anonymous())?;
-						args.push(DynArgument::NewId(resource.to_untyped(), None));
+					if arg_desc.interface.is_some() {
+						let id = reader.next_new_id()?;
+						args.push(DynArgument::NewId(id, None));
 					} else {
-						let name = String::from_utf8(reader.next_string()?.unwrap()).unwrap(); // TODO treat non-utf8 properly, i.e., use CString instead
-						let version = reader.next_uint()?;
-						let id = reader.next_uint()?;
-						//let interface = protocols.find_interface(InterfaceTitle::new(name, version)).ok_or(())?; // TODO this was a silly endeavour
-						let interface = DynInterface::new_anonymous();
-						let resource = resources.add_object_dyn(client, id, interface)?;
-						args.push(DynArgument::NewId(resource.to_untyped(), Some(InterfaceTitle::new(name, version))));
+						let (id, title) = reader.next_new_id_anonymous()?;
+						args.push(DynArgument::NewId(id, Some(title)));
 					}
 				}
 			    ArgumentType::Array => args.push(DynArgument::Array(reader.next_array()?)),
@@ -279,16 +275,12 @@ pub enum ParseRawError {
 	IoError(#[from] std::io::Error),
 	#[error("The message did not contain the expected amount of file descriptors")]
 	InsufficientFds,
-	#[error(transparent)]
-	AddObjectError(#[from] AddObjectError),
 	#[error("The message referenced an object id that does not exist")]
 	ObjectDoesntExist,
 }
 
 #[derive(Debug, Error)]
 pub enum SerializeRawError {
-	#[error(transparent)]
-	AddObjectError(#[from] AddObjectError),
 	#[error("Tried to serialize a message with an array whose length exceeds a 32 bit size")]
 	ArrayTooLong,
 	#[error("The size of the message after serializing exceeded a 16 bit size")]
@@ -311,16 +303,10 @@ pub enum DynArgument {
 	Uint(u32),
 	Fixed(Fixed),
 	String(Option<Vec<u8>>), // TODO wrap this Vec in a newtype to make helper functions easily available and allow more type inference shenanigans
-	Object(Option<Resource<Untyped>>),
-	NewId(Resource<Untyped>, Option<InterfaceTitle>),
+	Object(Option<u32>),
+	NewId(u32, Option<InterfaceTitle>),
 	Array(Vec<u8>),
 	Fd(RawFd),
-}
-
-#[derive(Debug, Clone)]
-pub enum NewId {
-	Typed(Resource<DynInterface>),
-	Untyped(Resource<Untyped>),
 }
 
 #[derive(Debug, Clone)]
@@ -356,12 +342,12 @@ impl DynArgumentReader {
 		if let DynArgument::String(v) = self.next_arg().ok_or(ArgumentError::InsufficientArguments)? { Ok(v) } else { Err(ArgumentError::IncorrectArguments) }
 	}
 
-	pub fn next_object(&mut self) -> Result<Option<Resource<Untyped>>, ArgumentError> {
+	pub fn next_object(&mut self) -> Result<Option<u32>, ArgumentError> {
 		if let DynArgument::Object(v) = self.next_arg().ok_or(ArgumentError::InsufficientArguments)? { Ok(v) } else { Err(ArgumentError::IncorrectArguments) }
 	}
 
-	pub fn next_new_id(&mut self) -> Result<Resource<Untyped>, ArgumentError> {
-		if let DynArgument::NewId(v, _interface) = self.next_arg().ok_or(ArgumentError::InsufficientArguments)? { Ok(v) } else { Err(ArgumentError::IncorrectArguments) }
+	pub fn next_new_id(&mut self) -> Result<(u32, Option<InterfaceTitle>), ArgumentError> {
+		if let DynArgument::NewId(v, interface) = self.next_arg().ok_or(ArgumentError::InsufficientArguments)? { Ok((v, interface)) } else { Err(ArgumentError::IncorrectArguments) }
 	}
 
 	pub fn next_array(&mut self) -> Result<Vec<u8>, ArgumentError> {
