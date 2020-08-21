@@ -1,5 +1,5 @@
 use wl_server::{
-	Server, NewResource,
+	Server, Resource, NewResource,
 	protocol::*,
 };
 
@@ -11,13 +11,15 @@ fn main() {
 	let state = State::new();
 	let mut server = Server::new(state).unwrap();
 	server.register_global::<WlCompositor, _>(|new_resource: NewResource<WlCompositor>| {
-		new_resource.register(|wl_compositor, request| {
-			dbg!(wl_compositor);
+		new_resource.register((), |compositor, request| {
+			dbg!(compositor);
 			dbg!(request);
 		});
 	});
+	// TODO: these required closure argument type annotations can be mitigated by adding a `register_fn` function
 	server.register_global::<WlShm, _>(|new_resource: NewResource<WlShm>| {
-		new_resource.register(|_wl_shm, request| {
+		new_resource.register(ShmData { }, |shm: Resource<WlShm>, request| {
+			let _shm_data = shm.get_data::<ShmData>().unwrap().get().unwrap();
 			match request {
 				WlShmRequest::CreatePool(create_pool) => {
 					dbg!(create_pool);
@@ -26,6 +28,10 @@ fn main() {
 		});
 	});
 	server.run().unwrap();
+}
+
+pub struct ShmData {
+
 }
 
 pub struct State {

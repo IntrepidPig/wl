@@ -136,12 +136,8 @@ pub struct RawGlobalImplementationConcrete<I: Interface> {
 
 impl<I: Interface> RawGlobalImplementation for RawGlobalImplementationConcrete<I> {
     fn dispatch(&mut self, this: NewResource<Untyped>) -> Result<(), GlobalDispatchError> {
-		let inner = this.inner;
-		let typed_resource = inner.downcast::<I>().ok_or(GlobalDispatchError::TypeMismatch)?;
-		let typed_new_resource = NewResource {
-			inner: typed_resource,
-		};
-		self.typed_implementation.handle(typed_new_resource);
+		let typed = this.downcast::<I>().ok_or(GlobalDispatchError::TypeMismatch)?;
+		self.typed_implementation.handle(typed);
 		Ok(())
     }
 }

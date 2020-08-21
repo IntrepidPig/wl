@@ -1,6 +1,6 @@
 use std::{
 	fmt,
-	io::{Write},
+	io::{Write}, marker::PhantomData,
 };
 
 use byteorder::{WriteBytesExt, NativeEndian};
@@ -38,6 +38,12 @@ impl<I> Resource<I> {
 
 	pub fn object(&self) -> ResourceHandle<Object> {
 		self.object.clone()
+	}
+
+	// TODO: returning a handle is not ideal because it does not convey that there is
+	// guaranteed to be a resource behind the handle, and an unwrap will usually follow.
+	pub fn get_data<T: 'static>(&self) -> Option<ResourceHandle<T>> {
+		self.object.get()?.get_data()
 	}
 
 	pub fn to_untyped(&self) -> Resource<Untyped> {
@@ -164,37 +170,47 @@ impl fmt::Debug for Resource<Untyped> {
 	}
 }
 
+// This is close to a resource owner. Exactly one gets created for every protocol object, unlike `Resource`.
+#[derive(Debug)]
 pub struct NewResource<I> {
-	pub(crate) inner: Resource<I>,
+	pub(crate) client: ResourceHandle<Client>,
+	pub(crate) object: ResourceHandle<Object>,
+	_phantom: PhantomData<I>,
 }
 
 impl<I> NewResource<I> {
-	pub(crate) fn new(resource: Resource<I>) -> Self {
+	pub(crate) fn new(client: ResourceHandle<Client>, object: ResourceHandle<Object>) -> Self {
 		Self {
-			inner: resource,
+			client,
+			object,
+			_phantom: PhantomData,
+		}
+	}
+}
+
+impl NewResource<Untyped> {
+	pub(crate) fn downcast<I: Interface>(self) -> Option<NewResource<I>> {
+		let object = self.object.get()?;
+		// TODO: version/subset checking too?
+		if I::as_dyn() == object.interface {
+			Some(NewResource {
+				client: self.client,
+				object: self.object,
+				_phantom: PhantomData,
+			})
+		} else {
+			None
 		}
 	}
 }
 
 impl<I, R> NewResource<I> where R: Message<ClientMap=ClientMap>, I: Interface<Request=R> + 'static {
-	pub fn register<Impl: ObjectImplementation<I> + 'static>(self, implementation: Impl) -> Resource<I> {
-		self.inner.set_implementation(implementation);
-		self.inner
-	}
-}
-
-impl<I: InterfaceDebug> fmt::Debug for NewResource<I> {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.debug_struct("NewResource")
-			.field("inner", &self.inner)
-			.finish()
-	}
-}
-
-impl fmt::Debug for NewResource<Untyped> {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.debug_struct("NewResource")
-			.field("inner", &self.inner)
-			.finish()
+	pub fn register<Impl: ObjectImplementation<I> + 'static, T: 'static>(self, data: T, implementation: Impl) -> Resource<I> {
+		if let Some(object) = self.object.get() {
+			let dispatcher = Dispatcher::new(implementation);
+			*object.dispatcher.borrow_mut() = Some(dispatcher);
+			object.set_data(data);
+		}
+		Resource::new(self.client, self.object)
 	}
 }

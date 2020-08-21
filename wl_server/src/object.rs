@@ -54,7 +54,7 @@ pub struct Object {
 	pub(crate) id: u32,
 	pub(crate) interface: DynInterface,
 	pub(crate) dispatcher: RefCell<Option<Dispatcher>>, 
-	pub(crate) data: Box<dyn Any>,
+	pub(crate) data: RefCell<Box<dyn Any>>,
 }
 
 impl Object {
@@ -63,7 +63,7 @@ impl Object {
 			id,
 			interface: I::as_dyn(),
 			dispatcher: RefCell::new(Some(Dispatcher::null::<I, R>())),
-			data: Box::new(()),
+			data: RefCell::new(Box::new(())),
 		}
 	}
 
@@ -73,8 +73,19 @@ impl Object {
 			id,
 			interface: DynInterface::new_anonymous(),
 			dispatcher: RefCell::new(None),
-			data: Box::new(()),
+			data: RefCell::new(Box::new(())),
 		}
+	}
+
+	pub fn set_data<T: 'static>(&self, data: T) -> ResourceHandle<T> {
+		let owner = ResourceOwner::new(data);
+		let handle = owner.handle();
+		*self.data.borrow_mut() = Box::new(owner);
+		handle
+	}
+
+	pub fn get_data<T: 'static>(&self) -> Option<ResourceHandle<T>> {
+		self.data.borrow().downcast_ref::<ResourceOwner<T>>().map(|owner| owner.handle())
 	}
 }
 

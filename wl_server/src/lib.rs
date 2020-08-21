@@ -13,3 +13,5 @@ pub use crate::{
 	global::{Global},
 	object::{ObjectImplementation},
 };
+
+pub use loaner::{ResourceOwner as Owner, ResourceHandle as Handle, ResourceRef as Ref};

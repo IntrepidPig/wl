@@ -205,7 +205,7 @@ impl ClientMap {
 		let object_owner = ResourceOwner::new(object);
 		let object_handle = object_owner.handle();
 		client.objects.borrow_mut().add(object_owner);
-		NewResource::new(Resource::new(self.handle.clone(), object_handle))
+		NewResource::new(self.handle.clone(), object_handle)
 	}
 
 	// TODO: accept InterfaceTitle?
@@ -215,12 +215,11 @@ impl ClientMap {
 		let object_owner = ResourceOwner::new(object);
 		let object_handle = object_owner.handle();
 		client.objects.borrow_mut().add(object_owner);
-		NewResource::new(Resource::new_untyped(self.handle.clone(), object_handle))
+		NewResource::new(self.handle.clone(), object_handle)
 	}
 
 	pub fn try_get_new_id<I>(&self, new_resource: &NewResource<I>) -> Result<(u32, InterfaceTitle), IntoArgsError> {
-		let untyped = new_resource.inner.to_untyped();
-		untyped.object().get().map(|object| (object.id, object.interface.title())).ok_or(IntoArgsError::ResourceDoesntExist)
+		new_resource.object.get().map(|object| (object.id, object.interface.title())).ok_or(IntoArgsError::ResourceDoesntExist)
 	}
 }
 
@@ -230,13 +229,13 @@ impl ObjectImplementation<WlDisplay> for WlDisplayImplementation {
     fn handle(&mut self, this: Resource<WlDisplay>, request: WlDisplayRequest) {
         match request {
 			WlDisplayRequest::Sync(sync) => {
-				let callback = sync.callback.register(|_, _| { });
+				let callback = sync.callback.register((), |_, _| { });
 				callback.send_event(WlCallbackEvent::Done(wl_callback::DoneEvent {
 					callback_data: 1, // TODO!: serial
 				}));
 			},
 			WlDisplayRequest::GetRegistry(get_registry) => {
-				let registry = get_registry.registry.register(WlRegistryImplementation);
+				let registry = get_registry.registry.register((), WlRegistryImplementation);
 				let client = this.client();
 				let client = client.get().unwrap();
 				*client.registry.borrow_mut() = Some(registry.clone());
