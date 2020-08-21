@@ -3,7 +3,7 @@ members = [
 	"wl_common",
 	"wl_scanner",
 	"wl_server",
-	#"xdg_shell_protocol",
+	"wl_protocols",
 ]
 
 [patch.crates-io]

@@ -1,12 +1,12 @@
 [package]
-name = "xdg_shell_protocol"
+name = "wl_protocols"
 version = "0.1.0"
 authors = ["intrepidpig"]
 edition = "2018"
 
 [dependencies]
 wl_common = { path = "../wl_common" }
-wl_protocol = { path = "../wl_protocol" }
+wl_server = { path = "../wl_server" }
 bitflags = "^1.2.1"
 byteorder = "^1.3.4"
 
