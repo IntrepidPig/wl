@@ -26,7 +26,7 @@ use wl_common::{
 
 use crate::{
 	client::{Client, ClientManager},
-	global::{GlobalImplementation, GlobalManager},
+	global::{GlobalImplementation, GlobalManager, Global},
 };
 
 pub enum ServerMessage {
@@ -109,8 +109,8 @@ impl Server {
 	}
 
 	// TODO!: accept and propagate version number
-	pub fn register_global<I: Interface + 'static, Impl: GlobalImplementation<I> + 'static>(&mut self, global_implementation: Impl) {
-		self.global_manager.borrow_mut().add_global(global_implementation);
+	pub fn register_global<I: Interface + 'static, Impl: GlobalImplementation<I> + 'static>(&mut self, global_implementation: Impl) -> Handle<Global> {
+		self.global_manager.borrow_mut().add_global(global_implementation)
 	}
 
 	pub fn run(&mut self) -> Result<(), ServerError> {
