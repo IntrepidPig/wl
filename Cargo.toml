@@ -2,6 +2,9 @@
 members = [
 	"wl_common",
 	"wl_scanner",
-	"wl_protocol",
-	"xdg_shell_protocol",
+	"wl_server",
+	#"xdg_shell_protocol",
 ]
+
+[patch.crates-io]
+nix = { path = "/home/intrepidpig/dev/nix" }
