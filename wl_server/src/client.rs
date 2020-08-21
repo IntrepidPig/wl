@@ -6,7 +6,7 @@ use std::{
 };
 
 use loaner::{
-	ResourceOwner, ResourceHandle,
+	Owner, Handle,
 };
 
 use wl_common::{
@@ -22,9 +22,9 @@ use crate::{
 
 #[derive(Debug)]
 pub struct ClientManager {
-	pub(crate) this: Option<ResourceHandle<RefCell<ClientManager>>>,
-	pub(crate) global_manager: Option<ResourceHandle<RefCell<GlobalManager>>>,
-	pub(crate) clients: Vec<ResourceOwner<Client>>,
+	pub(crate) this: Option<Handle<RefCell<ClientManager>>>,
+	pub(crate) global_manager: Option<Handle<RefCell<GlobalManager>>>,
+	pub(crate) clients: Vec<Owner<Client>>,
 }
 
 impl ClientManager {
@@ -36,30 +36,30 @@ impl ClientManager {
 		}
 	}
 
-	pub(crate) fn set_this(&mut self, client_manager: ResourceHandle<RefCell<ClientManager>>) {
+	pub(crate) fn set_this(&mut self, client_manager: Handle<RefCell<ClientManager>>) {
 		self.this = Some(client_manager);
 	}
 
-	pub(crate) fn this(&self) -> ResourceHandle<RefCell<ClientManager>> {
+	pub(crate) fn this(&self) -> Handle<RefCell<ClientManager>> {
 		self.this.clone().expect("Client manager self-reference not set")
 	}
 
-	pub(crate) fn set_global_manager(&mut self, global_manager: ResourceHandle<RefCell<GlobalManager>>) {
+	pub(crate) fn set_global_manager(&mut self, global_manager: Handle<RefCell<GlobalManager>>) {
 		self.global_manager = Some(global_manager);
 	}
 
-	pub(crate) fn global_manager(&self) -> ResourceHandle<RefCell<GlobalManager>> {
+	pub(crate) fn global_manager(&self) -> Handle<RefCell<GlobalManager>> {
 		self.global_manager.clone().expect("Global manager not set")
 	}
 
-	pub fn create_client(&mut self, stream: UnixStream) -> ResourceHandle<Client> {
+	pub fn create_client(&mut self, stream: UnixStream) -> Handle<Client> {
 		let client = Client::new(self.this(), self.global_manager(), stream);
 		let handle = client.handle();
 		self.clients.push(client);
 		handle
 	}
 
-	pub fn destroy_client(&mut self, handle: ResourceHandle<Client>) {
+	pub fn destroy_client(&mut self, handle: Handle<Client>) {
 		if let Some(idx) = self.clients.iter().enumerate().find(|(_i, owner)| {
 			handle.is(owner.handle())
 		}).map(|(i, _owner)| i) {
@@ -72,24 +72,24 @@ impl ClientManager {
 // TODO: allow the user to associate dynamic data with a client as they do with objects
 #[derive(Debug)]
 pub struct Client {
-	handle: RefCell<Option<ResourceHandle<Client>>>, // TODO: ensure necessary
-	client_manager: ResourceHandle<RefCell<ClientManager>>,
-	global_manager: ResourceHandle<RefCell<GlobalManager>>,
+	handle: RefCell<Option<Handle<Client>>>, // TODO: ensure necessary
+	client_manager: Handle<RefCell<ClientManager>>,
+	global_manager: Handle<RefCell<GlobalManager>>,
 	
 	pub(crate) stream: RefCell<UnixStream>,
-	pub(crate) objects: ResourceOwner<RefCell<ObjectMap>>, // TODO: remove from ResourceOwner,
+	pub(crate) objects: Owner<RefCell<ObjectMap>>, // TODO: remove from Owner,
 
 	pub(crate) display: RefCell<Option<Resource<WlDisplay>>>,
 	pub(crate) registry: RefCell<Option<Resource<WlRegistry>>>,
 }
 
 impl Client {
-	pub(crate) fn new(client_manager: ResourceHandle<RefCell<ClientManager>>, global_manager: ResourceHandle<RefCell<GlobalManager>>, stream: UnixStream) -> ResourceOwner<Self> {
+	pub(crate) fn new(client_manager: Handle<RefCell<ClientManager>>, global_manager: Handle<RefCell<GlobalManager>>, stream: UnixStream) -> Owner<Self> {
 		let mut objects = ObjectMap::new();
-		objects.add(ResourceOwner::new(Object::new::<WlDisplay, _>(1)));
-		let objects = ResourceOwner::new(RefCell::new(objects));
+		objects.add(Owner::new(Object::new::<WlDisplay, _>(1)));
+		let objects = Owner::new(RefCell::new(objects));
 
-		let partial = ResourceOwner::new(Self {
+		let partial = Owner::new(Self {
 			handle: RefCell::new(None),
 			client_manager,
 			global_manager,
@@ -107,7 +107,7 @@ impl Client {
 		partial
 	}
 
-	fn handle(&self) -> ResourceHandle<Client> {
+	fn handle(&self) -> Handle<Client> {
 		self.handle.borrow().clone().expect("Handle not set")
 	}
 
@@ -179,7 +179,7 @@ impl Client {
 // TODO: rename this to something that more clearly means "a reference to a client's map of objects"
 // Right now the name seems like it means "a map of clients"
 pub struct ClientMap {
-	handle: ResourceHandle<Client>,
+	handle: Handle<Client>,
 }
 
 // TODO: review possibilites of the handle being null
@@ -202,7 +202,7 @@ impl ClientMap {
 	pub fn add_new_id<I, R>(&self, id: u32) -> NewResource<I> where R: Message<ClientMap=ClientMap> + fmt::Debug, I: Interface<Request=R> + fmt::Debug + 'static {
 		let client = self.handle.get().expect("Client was destroyed");
 		let object = Object::new::<I, R>(id);
-		let object_owner = ResourceOwner::new(object);
+		let object_owner = Owner::new(object);
 		let object_handle = object_owner.handle();
 		client.objects.borrow_mut().add(object_owner);
 		NewResource::new(self.handle.clone(), object_handle)
@@ -212,7 +212,7 @@ impl ClientMap {
 	pub fn add_new_id_untyped(&self, id: u32) -> NewResource<Untyped> {
 		let client = self.handle.get().expect("Client was destroyed");
 		let object = Object::new_untyped(id);
-		let object_owner = ResourceOwner::new(object);
+		let object_owner = Owner::new(object);
 		let object_handle = object_owner.handle();
 		client.objects.borrow_mut().add(object_owner);
 		NewResource::new(self.handle.clone(), object_handle)

@@ -15,7 +15,7 @@ use std::{
 	fmt,
 };
 
-use loaner::{ResourceOwner, ResourceHandle};
+use loaner::{Owner, Handle};
 use thiserror::{Error};
 
 use wl_common::{
@@ -58,8 +58,8 @@ const MAX_FDS: usize = 16;
 pub struct Server<State> {
 	state: State,
 	listener: UnixListener,
-	client_manager: ResourceOwner<RefCell<ClientManager>>,
-	global_manager: ResourceOwner<RefCell<GlobalManager>>,
+	client_manager: Owner<RefCell<ClientManager>>,
+	global_manager: Owner<RefCell<GlobalManager>>,
 	msg_buf: Box<[u8; MAX_MESSAGE_SIZE]>,
 	next_serial: u32,
 }
@@ -70,8 +70,8 @@ impl<State> Server<State> {
 			.map_err(|e| ServerCreateError::SocketBind(e))?;
 		listener.set_nonblocking(true)?;
 
-		let client_manager = ResourceOwner::new(RefCell::new(ClientManager::new()));
-		let global_manager = ResourceOwner::new(RefCell::new(GlobalManager::new(client_manager.handle())));
+		let client_manager = Owner::new(RefCell::new(ClientManager::new()));
+		let global_manager = Owner::new(RefCell::new(GlobalManager::new(client_manager.handle())));
 		client_manager.borrow_mut().set_global_manager(global_manager.handle());
 		client_manager.borrow_mut().set_this(client_manager.handle());
 
@@ -137,7 +137,7 @@ impl<State> Server<State> {
 		}
 	}
 
-	pub fn try_accept(&mut self) -> Result<Option<ResourceHandle<Client>>, ServerError> {
+	pub fn try_accept(&mut self) -> Result<Option<Handle<Client>>, ServerError> {
 		if let Some(stream) = self.try_accept_stream()? {
 			let handle = self.client_manager.borrow_mut().create_client(stream);
 			Ok(Some(handle))
@@ -160,7 +160,7 @@ impl<State> Server<State> {
 		}
 	}
 
-	fn try_next_raw_message(&mut self) -> Result<Option<(ResourceHandle<Client>, RawMessage)>, ServerError> {
+	fn try_next_raw_message(&mut self) -> Result<Option<(Handle<Client>, RawMessage)>, ServerError> {
 		use nix::{
 			sys::{socket, uio::IoVec},
 			poll,

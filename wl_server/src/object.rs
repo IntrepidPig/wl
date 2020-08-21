@@ -7,7 +7,7 @@ use std::{
 use thiserror::{Error};
 
 use loaner::{
-	ResourceOwner, ResourceHandle,
+	Owner, Handle,
 };
 
 use wl_common::{
@@ -22,8 +22,8 @@ use crate::{
 
 #[derive(Debug)]
 pub struct ObjectMap {
-	client: Option<ResourceHandle<Client>>, // TODO: ensure necessary
-	objects: Vec<ResourceOwner<Object>>,
+	client: Option<Handle<Client>>, // TODO: ensure necessary
+	objects: Vec<Owner<Object>>,
 }
 
 impl ObjectMap {
@@ -34,11 +34,11 @@ impl ObjectMap {
 		}
 	}
 
-	pub fn add(&mut self, object: ResourceOwner<Object>) {
+	pub fn add(&mut self, object: Owner<Object>) {
 		self.objects.push(object);
 	}
 
-	pub fn find<F: Fn(&ResourceOwner<Object>) -> bool>(&self, f: F) -> Option<ResourceHandle<Object>> {
+	pub fn find<F: Fn(&Owner<Object>) -> bool>(&self, f: F) -> Option<Handle<Object>> {
 		self.objects.iter().find_map(|object| {
 			if f(object) {
 				Some(object.handle())
@@ -77,15 +77,15 @@ impl Object {
 		}
 	}
 
-	pub fn set_data<T: 'static>(&self, data: T) -> ResourceHandle<T> {
-		let owner = ResourceOwner::new(data);
+	pub fn set_data<T: 'static>(&self, data: T) -> Handle<T> {
+		let owner = Owner::new(data);
 		let handle = owner.handle();
 		*self.data.borrow_mut() = Box::new(owner);
 		handle
 	}
 
-	pub fn get_data<T: 'static>(&self) -> Option<ResourceHandle<T>> {
-		self.data.borrow().downcast_ref::<ResourceOwner<T>>().map(|owner| owner.handle())
+	pub fn get_data<T: 'static>(&self) -> Option<Handle<T>> {
+		self.data.borrow().downcast_ref::<Owner<T>>().map(|owner| owner.handle())
 	}
 }
 

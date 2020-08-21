@@ -5,6 +5,7 @@ pub mod resource;
 pub mod global;
 pub mod object;
 pub mod net;
+pub use loaner;
 
 pub use crate::{
 	server::{Server},
@@ -12,6 +13,5 @@ pub use crate::{
 	resource::{Resource, NewResource, Untyped},
 	global::{Global},
 	object::{ObjectImplementation},
+	loaner::{Owner, Handle},
 };
-
-pub use loaner::{ResourceOwner as Owner, ResourceHandle as Handle, ResourceRef as Ref};

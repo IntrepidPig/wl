@@ -4,7 +4,7 @@ use std::{
 };
 
 use byteorder::{WriteBytesExt, NativeEndian};
-use loaner::{ResourceHandle};
+use loaner::{Handle};
 
 use wl_common::{
 	wire::{DynMessage},
@@ -19,8 +19,8 @@ use crate::{
 // TODO: rename to WlResource to avoid confusion? or make more confusion...
 #[derive(Clone)]
 pub struct Resource<I> {
-	client: ResourceHandle<Client>,
-	object: ResourceHandle<Object>,
+	client: Handle<Client>,
+	object: Handle<Object>,
 	interface: I,
 }
 
@@ -32,17 +32,17 @@ impl<I> Resource<I> {
 		&self.interface
 	}
 
-	pub fn client(&self) -> ResourceHandle<Client> {
+	pub fn client(&self) -> Handle<Client> {
 		self.client.clone()
 	}
 
-	pub fn object(&self) -> ResourceHandle<Object> {
+	pub fn object(&self) -> Handle<Object> {
 		self.object.clone()
 	}
 
 	// TODO: returning a handle is not ideal because it does not convey that there is
 	// guaranteed to be a resource behind the handle, and an unwrap will usually follow.
-	pub fn get_data<T: 'static>(&self) -> Option<ResourceHandle<T>> {
+	pub fn get_data<T: 'static>(&self) -> Option<Handle<T>> {
 		self.object.get()?.get_data()
 	}
 
@@ -56,7 +56,7 @@ impl<I> Resource<I> {
 }
 
 impl<I: Interface> Resource<I> {
-	pub(crate) fn new(client: ResourceHandle<Client>, object: ResourceHandle<Object>) -> Self {
+	pub(crate) fn new(client: Handle<Client>, object: Handle<Object>) -> Self {
 		Self {
 			client,
 			object,
@@ -117,7 +117,7 @@ impl<I, E> Resource<I> where E: Message<ClientMap=ClientMap> + fmt::Debug, I: In
 }
 
 impl Resource<Untyped> {
-	pub(crate) fn new_untyped(client: ResourceHandle<Client>, object: ResourceHandle<Object>) -> Self {
+	pub(crate) fn new_untyped(client: Handle<Client>, object: Handle<Object>) -> Self {
 		Resource {
 			client,
 			object,
@@ -173,13 +173,13 @@ impl fmt::Debug for Resource<Untyped> {
 // This is close to a resource owner. Exactly one gets created for every protocol object, unlike `Resource`.
 #[derive(Debug)]
 pub struct NewResource<I> {
-	pub(crate) client: ResourceHandle<Client>,
-	pub(crate) object: ResourceHandle<Object>,
+	pub(crate) client: Handle<Client>,
+	pub(crate) object: Handle<Object>,
 	_phantom: PhantomData<I>,
 }
 
 impl<I> NewResource<I> {
-	pub(crate) fn new(client: ResourceHandle<Client>, object: ResourceHandle<Object>) -> Self {
+	pub(crate) fn new(client: Handle<Client>, object: Handle<Object>) -> Self {
 		Self {
 			client,
 			object,

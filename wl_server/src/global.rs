@@ -3,7 +3,7 @@ use std::{
 	cell::{RefCell},
 };
 
-use loaner::{ResourceOwner, ResourceHandle};
+use loaner::{Owner, Handle};
 use thiserror::{Error};
 
 use wl_common::{
@@ -17,13 +17,13 @@ use crate::{
 
 #[derive(Debug)]
 pub(crate) struct GlobalManager {
-	client_manager: ResourceHandle<RefCell<ClientManager>>,
-	pub(crate) globals: Vec<ResourceOwner<Global>>,
+	client_manager: Handle<RefCell<ClientManager>>,
+	pub(crate) globals: Vec<Owner<Global>>,
 	next_name: u32,
 }
 
 impl GlobalManager {
-	pub(crate) fn new(client_manager: ResourceHandle<RefCell<ClientManager>>) -> Self {
+	pub(crate) fn new(client_manager: Handle<RefCell<ClientManager>>) -> Self {
 		Self {
 			client_manager,
 			globals: Vec::new(),
@@ -38,7 +38,7 @@ impl GlobalManager {
 	}
 
 	// TODO: debate the return type of this
-	pub fn add_global<I: Interface + 'static, Impl: GlobalImplementation<I> + 'static>(&mut self, global_implementation: Impl) -> ResourceHandle<Global> {
+	pub fn add_global<I: Interface + 'static, Impl: GlobalImplementation<I> + 'static>(&mut self, global_implementation: Impl) -> Handle<Global> {
 		let name = self.next_name();
 		let global = Global::new(name, global_implementation);
 		let client_manager = self.client_manager.get().expect("Client manager destroyed");
@@ -46,7 +46,7 @@ impl GlobalManager {
 		for client in &client_manager.clients {
 			client.advertise_global::<I>(name);
 		}
-		let owner = ResourceOwner::new(global);
+		let owner = Owner::new(global);
 		let handle = owner.handle();
 		self.globals.push(owner);
 		handle
@@ -65,7 +65,7 @@ impl GlobalManager {
 		}
 	}
 
-	pub(crate) fn globals(&self) -> impl Iterator<Item=ResourceHandle<Global>> + '_ {
+	pub(crate) fn globals(&self) -> impl Iterator<Item=Handle<Global>> + '_ {
 		self.globals.iter().map(|owner| owner.handle())
 	}
 }
