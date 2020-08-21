@@ -16,6 +16,7 @@ use wl_common::{
 };
 
 use crate::{
+	server::{State},
 	client::{Client, ClientMap},
 	resource::{Resource, Untyped},
 };
@@ -109,7 +110,7 @@ impl Dispatcher {
 		struct NullImpl;
 
 		impl<M, I: Interface<Request=M>> ObjectImplementation<I> for NullImpl where M: Message + fmt::Debug {
-			fn handle(&mut self, this: Resource<I>, request: I::Request) {
+			fn handle(&mut self, _state: &mut State, this: Resource<I>, request: I::Request) {
 				log::debug!("Got unhandled request for {:?}: {:?}", this, request);
 			}
 		}
@@ -124,8 +125,8 @@ impl Dispatcher {
 		}
 	}
 
-	pub fn dispatch(&mut self, this: Resource<Untyped>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError> {
-		self.implementation.dispatch(this, opcode, args)
+	pub fn dispatch(&mut self, state: &mut State, this: Resource<Untyped>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError> {
+		self.implementation.dispatch(state, this, opcode, args)
 	}
 }
 
@@ -138,17 +139,18 @@ impl fmt::Debug for Dispatcher {
 }
 
 pub trait ObjectImplementation<I: Interface> {
-	fn handle(&mut self, this: Resource<I>, request: I::Request);
+	fn handle(&mut self, state: &mut State, this: Resource<I>, request: I::Request);
 }
 
-impl<I: Interface, F> ObjectImplementation<I> for F where F: FnMut(Resource<I>, I::Request) {
-    fn handle(&mut self, this: Resource<I>, request: I::Request) {
-        (self)(this, request)
+impl<I: Interface, F: FnMut(&mut State, Resource<I>, I::Request)> ObjectImplementation<I> for F {
+	fn handle(&mut self, state: &mut State, this: Resource<I>, request: I::Request) {
+        (self)(state, this, request)
     }
 }
 
+
 pub trait RawObjectImplementation {
-	fn dispatch(&mut self, this: Resource<Untyped>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError>;
+	fn dispatch(&mut self, state: &mut State, this: Resource<Untyped>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError>;
 }
 
 pub struct RawObjectImplementationConcrete<I> {
@@ -157,11 +159,11 @@ pub struct RawObjectImplementationConcrete<I> {
 }
 
 impl<R, I> RawObjectImplementation for RawObjectImplementationConcrete<I> where R: Message<ClientMap=ClientMap>, I: Interface<Request=R> {
-	fn dispatch(&mut self, this: Resource<Untyped>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError> {
+	fn dispatch(&mut self, state: &mut State, this: Resource<Untyped>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError> {
 		let typed_resource = this.downcast::<I>().ok_or(DispatchError::TypeMismatch)?;
 		let client_map = this.client().get().unwrap().client_map();
 		let request = I::Request::from_args(client_map, opcode, args)?;
-		self.typed_implementation.handle(typed_resource, request);
+		self.typed_implementation.handle(state, typed_resource, request);
 		Ok(())
 	}
 }

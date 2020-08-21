@@ -14,6 +14,7 @@ use wl_common::{
 };
 
 use crate::{
+	server::{State},
 	resource::{Resource, Untyped, NewResource},
 	object::{Object, ObjectMap, ObjectImplementation},
 	global::{GlobalManager},
@@ -226,10 +227,10 @@ impl ClientMap {
 pub struct WlDisplayImplementation;
 
 impl ObjectImplementation<WlDisplay> for WlDisplayImplementation {
-    fn handle(&mut self, this: Resource<WlDisplay>, request: WlDisplayRequest) {
+    fn handle(&mut self, _state: &mut State, this: Resource<WlDisplay>, request: WlDisplayRequest) {
         match request {
 			WlDisplayRequest::Sync(sync) => {
-				let callback = sync.callback.register((), |_, _| { });
+				let callback = sync.callback.register_fn((), |_, _, _| { });
 				callback.send_event(WlCallbackEvent::Done(wl_callback::DoneEvent {
 					callback_data: 1, // TODO!: serial
 				}));
@@ -248,7 +249,7 @@ impl ObjectImplementation<WlDisplay> for WlDisplayImplementation {
 pub struct WlRegistryImplementation;
 
 impl ObjectImplementation<WlRegistry> for WlRegistryImplementation {
-    fn handle(&mut self, this: Resource<WlRegistry>, request: WlRegistryRequest) {
+    fn handle(&mut self, _state: &mut State, this: Resource<WlRegistry>, request: WlRegistryRequest) {
         match request {
 			WlRegistryRequest::Bind(bind) => {
 				let client = this.client();

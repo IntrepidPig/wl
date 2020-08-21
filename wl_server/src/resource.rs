@@ -12,6 +12,7 @@ use wl_common::{
 };
 
 use crate::{
+	server::{State},
 	client::{Client, ClientMap},
 	object::{Object, ObjectImplementation, Dispatcher}, server::SendEventError,
 };
@@ -213,4 +214,23 @@ impl<I, R> NewResource<I> where R: Message<ClientMap=ClientMap>, I: Interface<Re
 		}
 		Resource::new(self.client, self.object)
 	}
+
+	pub fn register_fn<T: 'static, F: FnMut(&mut State, Resource<I>, I::Request) + 'static>(self, data: T, f: F) -> Resource<I> {
+		let implementation = ObjectImplementationFn {
+			f,
+			_phantom: PhantomData,
+		};
+		self.register(data, implementation)
+	}
+}
+
+struct ObjectImplementationFn<I: Interface, F: FnMut(&mut State, Resource<I>, I::Request)> {
+	f: F,
+	_phantom: PhantomData<I>,
+}
+
+impl<I: Interface, F: FnMut(&mut State, Resource<I>, I::Request)> ObjectImplementation<I> for ObjectImplementationFn<I, F> {
+	fn handle(&mut self, state: &mut State, this: Resource<I>, request: I::Request) {
+        (self.f)(state, this, request)
+    }
 }

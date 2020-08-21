@@ -12,6 +12,7 @@ use std::{
 	ffi::{CString},
 	collections::{HashMap, VecDeque},
 	cell::{RefCell},
+	any::{Any},
 	fmt,
 };
 
@@ -55,8 +56,28 @@ pub enum ServerCreateError {
 const MAX_MESSAGE_SIZE: usize = 4096;
 const MAX_FDS: usize = 16;
 
-pub struct Server<State> {
-	state: State,
+pub struct State {
+	inner: Box<dyn Any>,
+}
+
+impl State {
+	pub fn new<S: 'static>(state: S) -> Self {
+		Self {
+			inner: Box::new(state),
+		}
+	}
+
+	pub fn get<S: 'static>(&self) -> &S {
+		self.inner.downcast_ref().expect("State type mismatch")
+	}
+
+	pub fn get_mut<S: 'static>(&mut self) -> &mut S {
+		self.inner.downcast_mut().expect("State type mismatch")
+	}
+}
+
+pub struct Server {
+	pub state: State,
 	listener: UnixListener,
 	client_manager: Owner<RefCell<ClientManager>>,
 	global_manager: Owner<RefCell<GlobalManager>>,
@@ -64,8 +85,8 @@ pub struct Server<State> {
 	next_serial: u32,
 }
 
-impl<State> Server<State> {
-	pub fn new(state: State) -> Result<Self, ServerCreateError> {
+impl Server {
+	pub fn new<S: 'static>(state: S) -> Result<Self, ServerCreateError> {
 		let listener = UnixListener::bind("/run/user/1000/wayland-0")
 			.map_err(|e| ServerCreateError::SocketBind(e))?;
 		listener.set_nonblocking(true)?;
@@ -74,6 +95,8 @@ impl<State> Server<State> {
 		let global_manager = Owner::new(RefCell::new(GlobalManager::new(client_manager.handle())));
 		client_manager.borrow_mut().set_global_manager(global_manager.handle());
 		client_manager.borrow_mut().set_this(client_manager.handle());
+
+		let state = State::new(state);
 
 		Ok(Self {
 			state,
@@ -123,7 +146,7 @@ impl<State> Server<State> {
 				// wtf
 				if false {} else {
 					if let Some(dispatcher) = &mut *object.dispatcher.borrow_mut() {
-						match dispatcher.dispatch(resource.to_untyped(), opcode, args) {
+						match dispatcher.dispatch(&mut self.state, resource.to_untyped(), opcode, args) {
 							Ok(_) => {},
 							Err(e) => {
 								log::error!("{}", e);
