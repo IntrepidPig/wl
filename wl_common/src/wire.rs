@@ -283,7 +283,7 @@ impl DynMessage {
 
 #[derive(Debug, Error)]
 pub enum ParseDynError {
-	#[error("An error occurred while parsing a message; the likely cause is insufficient data sent")]
+	#[error("An IO error occurred while parsing a message\nSource: {0}")]
 	IoError(#[from] std::io::Error),
 	#[error("The message did not contain the expected amount of file descriptors")]
 	InsufficientFds,
