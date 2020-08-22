@@ -20,7 +20,7 @@ use loaner::{Owner, Handle};
 use thiserror::{Error};
 
 use wl_common::{
-	wire::{MessageHeader, RawMessage, RawMessageReader, SerializeRawError},
+	wire::{MessageHeader, RawMessage, RawMessageReader, SerializeRawError, ParseDynError},
 	interface::{Interface, IntoArgsError},
 };
 
@@ -39,10 +39,14 @@ pub enum ServerError {
 	SocketBind(#[from] ServerCreateError),
 	#[error("Failed to accept connection from client")]
 	AcceptError(#[source] io::Error),
-	#[error("Received a message in an invalid format")]
+	#[error("Failed to parse data as a message")]
 	InvalidMessage,
+	#[error("Could not convert message arguments to a request")]
+	InvalidArguments(#[from] ParseDynError),
 	#[error("An unknown IO error occurred")]
 	UnknownIoError(#[from] io::Error),
+	#[error("A client sent a request to an object that doesn't exist")]
+	RequestReceiverDoesntExist,
 }
 
 #[derive(Debug, Error)]
@@ -123,49 +127,49 @@ impl Server {
 
 	pub fn run<S: 'static, F: FnMut(Handle<Client>) -> S>(&mut self, mut client_state_creator: F) -> Result<(), ServerError> {
 		loop {
-			match self.try_accept(&mut client_state_creator) {
-				Ok(Some(_)) => log::info!("Client connected"),
-				Ok(None) => {},
-				Err(e) => log::error!("Client connection error: {:?}", e),
+			match self.dispatch(&mut client_state_creator) {
+				Ok(()) => {},
+				Err(e) => log::error!("{}", e),
 			}
-			
-			if let Some((client_handle, raw_message)) = self.try_next_raw_message()? {
-				let client = client_handle.get().expect("Client was destroyed");
-				let resource = match client.find_by_id_untyped(raw_message.header.sender) {
-					Some(resource) => resource,
-					None => {
-						log::warn!("A client sent an event to a resource that no longer exists; ignoring...");
-						continue;
-					}
-				};
-				let object_handle = resource.object();
-				let object = object_handle.get().unwrap();
+		}
+	}
 
-				let reader = RawMessageReader::new(&raw_message);
-				let opcode = raw_message.header.opcode;
-				let args = match wl_common::wire::DynMessage::parse_dyn_args(object.interface.requests[raw_message.header.opcode as usize], reader) {
-					Ok(args) => args,
-					Err(e) => {
-						log::error!("Failed to parse client message: {}", e);
-						continue;
-					}
-				};
+	pub fn dispatch<S: 'static, F: FnMut(Handle<Client>) -> S>(&mut self, mut client_state_creator: F) -> Result<(), ServerError> {
+		match self.try_accept(&mut client_state_creator) {
+			Ok(Some(_)) => log::info!("Client connected"),
+			Ok(None) => {},
+			Err(e) => log::error!("Client connection error: {:?}", e),
+		}
+		
+		if let Some((client_handle, raw_message)) = self.try_next_raw_message()? {
+			let client = client_handle.get().expect("Client was destroyed");
+			let resource = match client.find_by_id_untyped(raw_message.header.sender) {
+				Some(resource) => resource,
+				None => return Err(ServerError::RequestReceiverDoesntExist),
+			};
+			let object_handle = resource.object();
+			let object = object_handle.get().ok_or(ServerError::RequestReceiverDoesntExist)?;
 
-				// wtf
-				if false {} else {
-					if let Some(dispatcher) = &mut *object.dispatcher.borrow_mut() {
-						match dispatcher.dispatch(&mut self.state, resource.to_untyped(), opcode, args) {
-							Ok(_) => {},
-							Err(e) => {
-								log::error!("{}", e);
-							}
+			let reader = RawMessageReader::new(&raw_message);
+			let opcode = raw_message.header.opcode;
+			let args = wl_common::wire::DynMessage::parse_dyn_args(object.interface.requests[raw_message.header.opcode as usize], reader)?;
+
+			// wtf
+			if false {} else {
+				if let Some(dispatcher) = &mut *object.dispatcher.borrow_mut() {
+					match dispatcher.dispatch(&mut self.state, resource.to_untyped(), opcode, args) {
+						Ok(_) => {},
+						Err(e) => {
+							log::error!("{}", e);
 						}
-					} else {
-						log::error!("Received a request for an object with no associated dispatcher");
 					}
+				} else {
+					log::error!("Received a request for an object with no associated dispatcher");
 				}
 			}
 		}
+
+		Ok(())
 	}
 
 	pub fn try_accept<S: 'static, F: FnOnce(Handle<Client>) -> S>(&mut self, state_creator: F) -> Result<Option<Handle<Client>>, ServerError> {

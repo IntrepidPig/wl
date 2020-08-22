@@ -88,20 +88,20 @@ impl<'a> RawMessageReader<'a, 'a> {
 }
 
 impl<'a, 'b> RawMessageReader<'a, 'b> {
-	pub fn next_int(&mut self) -> Result<i32, ParseRawError> {
+	pub fn next_int(&mut self) -> Result<i32, ParseDynError> {
 		self.data.read_i32::<NativeEndian>().map_err(From::from)
 	}
 
-	pub fn next_uint(&mut self) -> Result<u32, ParseRawError> {
+	pub fn next_uint(&mut self) -> Result<u32, ParseDynError> {
 		self.data.read_u32::<NativeEndian>().map_err(From::from)
 	}
 
-	pub fn next_fixed(&mut self) -> Result<Fixed, ParseRawError> {
+	pub fn next_fixed(&mut self) -> Result<Fixed, ParseDynError> {
 		self.next_uint().map(Fixed)
 	}
 
 	// TODO convert to CString maybe (required trailing nul concerns say maybe not)
-	pub fn next_string(&mut self) -> Result<Option<Vec<u8>>, ParseRawError> {
+	pub fn next_string(&mut self) -> Result<Option<Vec<u8>>, ParseDynError> {
 		let array = self.next_array()?;
 		if array.is_empty() {
 			Ok(None)
@@ -110,7 +110,7 @@ impl<'a, 'b> RawMessageReader<'a, 'b> {
 		}
 	}
 	
-	pub fn next_object(&mut self) -> Result<Option<u32>, ParseRawError> {
+	pub fn next_object(&mut self) -> Result<Option<u32>, ParseDynError> {
 		let id = self.next_uint()?;
 		if id == 0 {
 			Ok(None)
@@ -119,38 +119,38 @@ impl<'a, 'b> RawMessageReader<'a, 'b> {
 		}
 	}
 
-	pub fn next_new_id(&mut self) -> Result<u32, ParseRawError> {
+	pub fn next_new_id(&mut self) -> Result<u32, ParseDynError> {
 		self.next_uint()
 	}
 
-	pub fn next_new_id_anonymous(&mut self) -> Result<(u32, InterfaceTitle), ParseRawError> {
+	pub fn next_new_id_anonymous(&mut self) -> Result<(u32, InterfaceTitle), ParseDynError> {
 		let name = String::from_utf8(self.next_string()?.unwrap()).unwrap(); // TODO treat non-utf8 properly, i.e., use CString instead
 		let version = self.next_uint()?;
 		let id = self.next_uint()?;
 		Ok((id, InterfaceTitle::new(name, version)))
 	}
 
-	pub fn next_array(&mut self) -> Result<Vec<u8>, ParseRawError> {
+	pub fn next_array(&mut self) -> Result<Vec<u8>, ParseDynError> {
 		let len = self.next_uint()?;
 		let mut buf = Vec::new();
 		for _ in 0..len {
-			let b = self.data.read_u8().map_err(ParseRawError::IoError)?;
+			let b = self.data.read_u8().map_err(ParseDynError::IoError)?;
 			buf.push(b);
 		}
 		// Read padding to the next 32 bit alignment position
 		for _ in 0..((4 - len % 4) % 4) {
-			self.data.read_u8().map_err(ParseRawError::IoError)?;
+			self.data.read_u8().map_err(ParseDynError::IoError)?;
 		}
 		Ok(buf)
 	}
 
-	pub fn next_fd(&mut self) -> Result<RawFd, ParseRawError> {
+	pub fn next_fd(&mut self) -> Result<RawFd, ParseDynError> {
 		if self.next_fd < self.fds.len() {
 			let fd = self.fds[self.next_fd];
 			self.next_fd += 1;
 			Ok(fd)
 		} else {
-			Err(ParseRawError::InsufficientFds)
+			Err(ParseDynError::InsufficientFds)
 		}
 	}
 }
@@ -171,7 +171,7 @@ impl DynMessage {
 		}
 	}
 
-	pub fn from_raw(args_desc: &[ArgumentDesc], reader: RawMessageReader) -> Result<Self, ParseRawError> {
+	pub fn from_raw(args_desc: &[ArgumentDesc], reader: RawMessageReader) -> Result<Self, ParseDynError> {
 		Ok(Self {
 			sender: reader.header.sender,
 			opcode: reader.header.opcode,
@@ -240,7 +240,7 @@ impl DynMessage {
 		Ok((buf, fds))
 	}
 
-	pub fn parse_dyn_args(args_desc: &[ArgumentDesc], mut reader: RawMessageReader) -> Result<Vec<DynArgument>, ParseRawError> {
+	pub fn parse_dyn_args(args_desc: &[ArgumentDesc], mut reader: RawMessageReader) -> Result<Vec<DynArgument>, ParseDynError> {
 		let mut args = Vec::new();
 		for arg_desc in args_desc {
 			match arg_desc.arg_type {
@@ -270,7 +270,7 @@ impl DynMessage {
 }
 
 #[derive(Debug, Error)]
-pub enum ParseRawError {
+pub enum ParseDynError {
 	#[error("An error occurred while parsing a message; the likely cause is insufficient data sent")]
 	IoError(#[from] std::io::Error),
 	#[error("The message did not contain the expected amount of file descriptors")]

@@ -45,6 +45,10 @@ impl<I> Resource<I> {
 		self.object.is(other.object)
 	}
 
+	pub fn destroy(&self) {
+		log::error!("Resource::destroy not implemented");
+	}
+
 	// TODO: returning a handle is not ideal because it does not convey that there is
 	// guaranteed to be a resource behind the handle, and an unwrap will usually follow.
 	pub fn get_data<'a, T: 'static>(&'a self) -> Option<Ref<'a, T>> {
