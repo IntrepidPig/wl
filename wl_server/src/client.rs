@@ -6,7 +6,7 @@ use std::{
 };
 
 use loaner::{
-	Owner, Handle,
+	Owner, Handle, Ref,
 };
 
 use wl_common::{
@@ -53,8 +53,8 @@ impl ClientManager {
 		self.global_manager.clone().expect("Global manager not set")
 	}
 
-	pub fn create_client(&mut self, stream: UnixStream) -> Handle<Client> {
-		let client = Client::new(self.this(), self.global_manager(), stream);
+	pub fn create_client<S: 'static>(&mut self, stream: UnixStream, state: S) -> Handle<Client> {
+		let client = Client::new(self.this(), self.global_manager(), stream, state);
 		let handle = client.handle();
 		self.clients.push(client);
 		handle
@@ -73,34 +73,37 @@ impl ClientManager {
 // TODO: allow the user to associate dynamic data with a client as they do with objects
 #[derive(Debug)]
 pub struct Client {
-	handle: RefCell<Option<Handle<Client>>>, // TODO: ensure necessary
+	this: RefCell<Option<Handle<Client>>>, // TODO: ensure necessary
 	client_manager: Handle<RefCell<ClientManager>>,
 	global_manager: Handle<RefCell<GlobalManager>>,
 	
 	pub(crate) stream: RefCell<UnixStream>,
 	pub(crate) objects: Owner<RefCell<ObjectMap>>, // TODO: remove from Owner,
+	pub(crate) state: RefCell<State>,
 
 	pub(crate) display: RefCell<Option<Resource<WlDisplay>>>,
 	pub(crate) registry: RefCell<Option<Resource<WlRegistry>>>,
 }
 
 impl Client {
-	pub(crate) fn new(client_manager: Handle<RefCell<ClientManager>>, global_manager: Handle<RefCell<GlobalManager>>, stream: UnixStream) -> Owner<Self> {
+	pub(crate) fn new<S: 'static>(client_manager: Handle<RefCell<ClientManager>>, global_manager: Handle<RefCell<GlobalManager>>, stream: UnixStream, state: S) -> Owner<Self> {
 		let mut objects = ObjectMap::new();
 		objects.add(Owner::new(Object::new::<WlDisplay, _>(1)));
 		let objects = Owner::new(RefCell::new(objects));
+		let state = RefCell::new(State::new(Owner::new(state)));
 
 		let partial = Owner::new(Self {
-			handle: RefCell::new(None),
+			this: RefCell::new(None),
 			client_manager,
 			global_manager,
 			stream: RefCell::new(stream),
 			objects,
+			state,
 			display: RefCell::new(None),
 			registry: RefCell::new(None),
 		});
 		let handle = partial.handle();
-		*partial.handle.borrow_mut() = Some(handle.clone());
+		*partial.this.borrow_mut() = Some(handle.clone());
 
 		let display = partial.find_by_id::<WlDisplay>(1).unwrap();
 		display.set_implementation(WlDisplayImplementation);
@@ -108,8 +111,16 @@ impl Client {
 		partial
 	}
 
+	pub fn set_state<S: 'static>(&self, state: S) {
+		*self.state.borrow_mut() = State::new(Owner::new(state));
+	}
+
+	pub fn state<'a, S: 'static>(&'a self) -> Ref<'a, S> {
+		self.state.borrow().get::<Owner<S>>().custom_ref()
+	}
+
 	fn handle(&self) -> Handle<Client> {
-		self.handle.borrow().clone().expect("Handle not set")
+		self.this.borrow().clone().expect("Handle not set")
 	}
 
 	pub(crate) fn advertise_current_globals(&self) {

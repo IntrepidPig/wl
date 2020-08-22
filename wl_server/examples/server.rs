@@ -19,7 +19,7 @@ fn main() {
 	// TODO: these required closure argument type annotations can be mitigated by adding a `register_fn` function
 	server.register_global::<WlShm, _>(|new_resource: NewResource<WlShm>| {
 		new_resource.register_fn(ShmData { }, |_state, shm: Resource<WlShm>, request| {
-			let _shm_data = shm.get_data::<ShmData>().unwrap().get().unwrap();
+			let _shm_data = shm.get_data::<ShmData>().unwrap();
 			match request {
 				WlShmRequest::CreatePool(create_pool) => {
 					dbg!(create_pool);
@@ -27,7 +27,7 @@ fn main() {
 			}
 		});
 	});
-	server.run().unwrap();
+	server.run(|_this| ClientState::new()).unwrap();
 }
 
 pub struct ShmData {
@@ -39,6 +39,18 @@ pub struct State {
 }
 
 impl State {
+	pub fn new() -> Self {
+		Self {
+
+		}
+	}
+}
+
+pub struct ClientState {
+
+}
+
+impl ClientState {
 	pub fn new() -> Self {
 		Self {
 

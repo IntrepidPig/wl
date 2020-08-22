@@ -60,6 +60,14 @@ pub struct State {
 	inner: Box<dyn Any>,
 }
 
+impl fmt::Debug for State {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.debug_struct("State")
+			.field("inner", &"<opaque>")
+			.finish()
+	}
+}
+
 impl State {
 	pub fn new<S: 'static>(state: S) -> Self {
 		Self {
@@ -113,9 +121,9 @@ impl Server {
 		self.global_manager.borrow_mut().add_global(global_implementation)
 	}
 
-	pub fn run(&mut self) -> Result<(), ServerError> {
+	pub fn run<S: 'static, F: FnMut(Handle<Client>) -> S>(&mut self, mut client_state_creator: F) -> Result<(), ServerError> {
 		loop {
-			match self.try_accept() {
+			match self.try_accept(&mut client_state_creator) {
 				Ok(Some(_)) => log::info!("Client connected"),
 				Ok(None) => {},
 				Err(e) => log::error!("Client connection error: {:?}", e),
@@ -160,9 +168,10 @@ impl Server {
 		}
 	}
 
-	pub fn try_accept(&mut self) -> Result<Option<Handle<Client>>, ServerError> {
+	pub fn try_accept<S: 'static, F: FnOnce(Handle<Client>) -> S>(&mut self, state_creator: F) -> Result<Option<Handle<Client>>, ServerError> {
 		if let Some(stream) = self.try_accept_stream()? {
-			let handle = self.client_manager.borrow_mut().create_client(stream);
+			let handle = self.client_manager.borrow_mut().create_client(stream, ());
+			handle.get().unwrap().set_state(state_creator(handle.clone()));
 			Ok(Some(handle))
 		} else {
 			Ok(None)

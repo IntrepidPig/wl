@@ -4,7 +4,7 @@ use std::{
 };
 
 use byteorder::{WriteBytesExt, NativeEndian};
-use loaner::{Handle};
+use loaner::{Owner, Handle, Ref};
 
 use wl_common::{
 	wire::{DynMessage},
@@ -47,8 +47,8 @@ impl<I> Resource<I> {
 
 	// TODO: returning a handle is not ideal because it does not convey that there is
 	// guaranteed to be a resource behind the handle, and an unwrap will usually follow.
-	pub fn get_data<T: 'static>(&self) -> Option<Handle<T>> {
-		self.object.get()?.get_data()
+	pub fn get_data<'a, T: 'static>(&'a self) -> Option<Ref<'a, T>> {
+		self.object.get()?.data.borrow().downcast_ref::<Owner<T>>().map(|owner| owner.custom_ref())
 	}
 
 	pub fn to_untyped(&self) -> Resource<Untyped> {

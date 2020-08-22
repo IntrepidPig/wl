@@ -7,7 +7,7 @@ use std::{
 use thiserror::{Error};
 
 use loaner::{
-	Owner, Handle,
+	Owner, Handle, Ref,
 };
 
 use wl_common::{
@@ -85,8 +85,8 @@ impl Object {
 		handle
 	}
 
-	pub fn get_data<T: 'static>(&self) -> Option<Handle<T>> {
-		self.data.borrow().downcast_ref::<Owner<T>>().map(|owner| owner.handle())
+	pub fn get_data<'a, T: 'static>(&'a self) -> Option<Ref<'a, T>> {
+		self.data.borrow().downcast_ref::<Owner<T>>().map(|owner| owner.custom_ref())
 	}
 }
 
