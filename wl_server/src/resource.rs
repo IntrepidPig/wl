@@ -137,7 +137,7 @@ impl Resource<Untyped> {
 	pub fn downcast<I: Interface>(&self) -> Option<Resource<I>> {
 		let object = self.object.get()?;
 		// TODO: version/subset checking too?
-		if I::as_dyn() == object.interface {
+		if I::as_dyn() == object.interface.get() {
 			Some(self.downcast_unchecked())
 		} else {
 			None
@@ -201,7 +201,7 @@ impl NewResource<Untyped> {
 	pub(crate) fn downcast<I: Interface>(self) -> Option<NewResource<I>> {
 		let object = self.object.get()?;
 		// TODO: version/subset checking too?
-		if I::as_dyn() == object.interface {
+		if I::as_dyn() == object.interface.get() {
 			Some(NewResource {
 				client: self.client,
 				object: self.object,

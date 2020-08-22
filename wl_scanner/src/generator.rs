@@ -254,8 +254,6 @@ fn generate_interface_impl(interface: &InterfaceDesc) -> TokenStream {
 	let version = Literal::i32_unsuffixed(interface.version);
 
 	quote! {
-		static _COW: Cow<'static, str> = Cow::Borrowed(#snake_name);
-
 		impl Interface for #camel_name {
 			type Request = #camel_name_request;
 			type Event = #camel_name_event;
@@ -271,7 +269,7 @@ fn generate_interface_impl(interface: &InterfaceDesc) -> TokenStream {
 
 			fn as_dyn() -> DynInterface {
 				DynInterface {
-					name: Cow::Borrowed(Self::NAME),
+					name: Self::NAME,
 					version: Self::VERSION,
 					requests: Self::REQUESTS,
 					events: Self::EVENTS,

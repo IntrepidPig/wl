@@ -1,6 +1,6 @@
 use std::{
 	any::{Any},
-	cell::{RefCell},
+	cell::{Cell, RefCell},
 	fmt,
 };
 
@@ -53,7 +53,7 @@ impl ObjectMap {
 #[derive(Debug)]
 pub struct Object {
 	pub(crate) id: u32,
-	pub(crate) interface: DynInterface,
+	pub(crate) interface: Cell<DynInterface>,
 	pub(crate) dispatcher: RefCell<Option<Dispatcher>>, 
 	pub(crate) data: RefCell<Box<dyn Any>>,
 }
@@ -62,7 +62,7 @@ impl Object {
 	pub fn new<I, R>(id: u32) -> Self where R: Message<ClientMap=ClientMap> + fmt::Debug, I: Interface<Request=R> + fmt::Debug + 'static {
 		Self {
 			id,
-			interface: I::as_dyn(),
+			interface: Cell::new(I::as_dyn()),
 			dispatcher: RefCell::new(Some(Dispatcher::null::<I, R>())),
 			data: RefCell::new(Box::new(())),
 		}
@@ -72,7 +72,7 @@ impl Object {
 	pub fn new_untyped(id: u32) -> Self {
 		Self {
 			id,
-			interface: DynInterface::new_anonymous(),
+			interface: Cell::new(DynInterface::new_anonymous()),
 			dispatcher: RefCell::new(None),
 			data: RefCell::new(Box::new(())),
 		}

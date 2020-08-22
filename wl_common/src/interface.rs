@@ -15,16 +15,15 @@ pub trait Interface {
 	type Event: Message;
 
 	const NAME: &'static str;
-	const VERSION: u32; // TODO: the version is specific to the object, so this is only represents the max server supported version of this interface
+	const VERSION: u32;
 	const REQUESTS: MessagesDesc;
 	const EVENTS: MessagesDesc;
 
 	fn new() -> Self where Self: Sized;
 
-	// TODO Move to Ext trait?
 	fn as_dyn() -> DynInterface {
 		DynInterface {
-			name: Cow::Borrowed(Self::NAME),
+			name: Self::NAME,
 			version: Self::VERSION,
 			requests: Self::REQUESTS,
 			events: Self::EVENTS,
@@ -53,9 +52,9 @@ impl<I: Interface> InterfaceDebug for I {
 
 pub const ANONYMOUS_NAME: &'static str = "anonymous";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DynInterface {
-	pub name: Cow<'static, str>, // This is a Cow because interface names are sometimes sent over the wire, but usually not
+	pub name: &'static str,
 	pub version: u32,
 	pub requests: MessagesDesc,
 	pub events: MessagesDesc,
@@ -72,9 +71,9 @@ impl InterfaceDebug for DynInterface {
 
 impl DynInterface {
 	// TODO: change to accept InterfaceTitle
-	pub fn new<N: Into<Cow<'static, str>>>(name: N, version: u32, requests: MessagesDesc, events: MessagesDesc) -> Self {
+	pub fn new(name: &'static str, version: u32, requests: MessagesDesc, events: MessagesDesc) -> Self {
 		Self {
-			name: name.into(),
+			name,
 			version,
 			requests,
 			events,

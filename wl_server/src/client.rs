@@ -231,7 +231,7 @@ impl ClientMap {
 	}
 
 	pub fn try_get_new_id<I>(&self, new_resource: &NewResource<I>) -> Result<(u32, InterfaceTitle), IntoArgsError> {
-		new_resource.object.get().map(|object| (object.id, object.interface.title())).ok_or(IntoArgsError::ResourceDoesntExist)
+		new_resource.object.get().map(|object| (object.id, object.interface.get().title())).ok_or(IntoArgsError::ResourceDoesntExist)
 	}
 }
 

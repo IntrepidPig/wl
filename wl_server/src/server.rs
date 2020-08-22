@@ -152,7 +152,7 @@ impl Server {
 
 			let reader = RawMessageReader::new(&raw_message);
 			let opcode = raw_message.header.opcode;
-			let args = wl_common::wire::DynMessage::parse_dyn_args(object.interface.requests[raw_message.header.opcode as usize], reader)?;
+			let args = wl_common::wire::DynMessage::parse_dyn_args(object.interface.get().requests[raw_message.header.opcode as usize], reader)?;
 
 			// wtf
 			if false {} else {
