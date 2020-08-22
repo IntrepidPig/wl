@@ -247,21 +247,20 @@ fn generate_interface_impl(interface: &InterfaceDesc) -> TokenStream {
 	let requests_array = generate_arg_arrays(&interface, MessageSide::Request);
 	let events_array = generate_arg_arrays(&interface, MessageSide::Event);
 
-	let snake_name = Ident::new(&interface.name, Span::call_site());
+	let snake_name = &interface.name;
 	let camel_name = Ident::new(&snake_to_camel(&interface.name), Span::call_site());
 	let camel_name_request = format_ident!("{}Request", camel_name);
 	let camel_name_event = format_ident!("{}Event", camel_name);
-	let snake_name_str = format!("\"{}\"", snake_name);
 	let version = Literal::i32_unsuffixed(interface.version);
 
 	quote! {
-		static _COW: Cow<'static, str> = Cow::Borrowed(#snake_name_str);
+		static _COW: Cow<'static, str> = Cow::Borrowed(#snake_name);
 
 		impl Interface for #camel_name {
 			type Request = #camel_name_request;
 			type Event = #camel_name_event;
 
-			const NAME: &'static str = #snake_name_str;
+			const NAME: &'static str = #snake_name;
 			const VERSION: u32 = #version;
 			const REQUESTS: &'static [&'static [ArgumentDesc]] = #requests_array;
 			const EVENTS: &'static [&'static [ArgumentDesc]] = #events_array;
