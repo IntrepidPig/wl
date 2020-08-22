@@ -62,7 +62,7 @@ impl ClientManager {
 
 	pub fn destroy_client(&mut self, handle: Handle<Client>) {
 		if let Some(idx) = self.clients.iter().enumerate().find(|(_i, owner)| {
-			handle.is(owner.handle())
+			handle.is(&owner.handle())
 		}).map(|(i, _owner)| i) {
 			let owner = self.clients.remove(idx);
 			drop(owner);

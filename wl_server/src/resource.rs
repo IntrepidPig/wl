@@ -41,8 +41,8 @@ impl<I> Resource<I> {
 		self.object.clone()
 	}
 
-	pub fn is(&self, other: Resource<I>) -> bool {
-		self.object.is(other.object)
+	pub fn is(&self, other: &Resource<I>) -> bool {
+		self.object.is(&other.object)
 	}
 
 	pub fn destroy(&self) {
