@@ -54,6 +54,7 @@ impl GlobalManager {
 
 	pub(crate) fn bind_global(&self, name: u32, this: NewResource<Untyped>) {
 		if let Some(global) = self.globals.iter().find(|global| global.name == name) {
+			this.object.get().unwrap().interface.set(global.interface);
 			match global.dispatcher.borrow_mut().dispatch(this) {
 				Ok(_) => {},
 				Err(e) => {
