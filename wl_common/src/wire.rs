@@ -13,6 +13,18 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Fixed(pub u32);
 
+impl From<f64> for Fixed {
+	fn from(v: f64) -> Self {
+		Self((v * 256f64) as u32)
+	}
+}
+
+impl From<Fixed> for f64 {
+	fn from(v: Fixed) -> Self {
+		(v.0 as f64) / 256f64
+	}
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct MessageHeader {
 	pub sender: u32,
