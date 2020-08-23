@@ -1,5 +1,4 @@
 use std::{
-	os::unix::net::{UnixStream},
 	ffi::{CString},
 	cell::{RefCell},
 	fmt,
@@ -10,11 +9,12 @@ use loaner::{
 };
 
 use wl_common::{
-	interface::{Interface, Message, IntoArgsError, InterfaceTitle},
+	interface::{Interface, Message, IntoArgsError, InterfaceTitle}, wire::DynMessage,
 };
 
 use crate::{
-	server::{State},
+	server::{State, SendEventError},
+	net::{NetClient, NetError},
 	resource::{Resource, Untyped, NewResource},
 	object::{Object, ObjectMap, ObjectImplementation},
 	global::{GlobalManager},
@@ -53,8 +53,8 @@ impl ClientManager {
 		self.global_manager.clone().expect("Global manager not set")
 	}
 
-	pub fn create_client<S: 'static>(&mut self, stream: UnixStream, state: S) -> Handle<Client> {
-		let client = Client::new(self.this(), self.global_manager(), stream, state);
+	pub fn create_client<S: 'static>(&mut self, net: NetClient, state: S) -> Handle<Client> {
+		let client = Client::new(self.this(), self.global_manager(), net, state);
 		let handle = client.handle();
 		self.clients.push(client);
 		handle
@@ -68,6 +68,14 @@ impl ClientManager {
 			drop(owner);
 		}
 	}
+
+	pub fn flush_clients(&self) -> Result<bool, NetError> {
+		let mut flushed = true;
+		for client in &self.clients {
+			flushed = flushed && client.net.borrow_mut().flush()?;
+		}
+		Ok(flushed)
+	}
 }
 
 // TODO: allow the user to associate dynamic data with a client as they do with objects
@@ -77,7 +85,7 @@ pub struct Client {
 	client_manager: Handle<RefCell<ClientManager>>,
 	global_manager: Handle<RefCell<GlobalManager>>,
 	
-	pub(crate) stream: RefCell<UnixStream>,
+	pub(crate) net: RefCell<NetClient>,
 	pub(crate) objects: Owner<RefCell<ObjectMap>>, // TODO: remove from Owner,
 	pub(crate) state: RefCell<State>,
 
@@ -86,7 +94,7 @@ pub struct Client {
 }
 
 impl Client {
-	pub(crate) fn new<S: 'static>(client_manager: Handle<RefCell<ClientManager>>, global_manager: Handle<RefCell<GlobalManager>>, stream: UnixStream, state: S) -> Owner<Self> {
+	pub(crate) fn new<S: 'static>(client_manager: Handle<RefCell<ClientManager>>, global_manager: Handle<RefCell<GlobalManager>>, net: NetClient, state: S) -> Owner<Self> {
 		let mut objects = ObjectMap::new();
 		objects.add(Owner::new(Object::new::<WlDisplay, _>(1)));
 		let objects = Owner::new(RefCell::new(objects));
@@ -96,7 +104,7 @@ impl Client {
 			this: RefCell::new(None),
 			client_manager,
 			global_manager,
-			stream: RefCell::new(stream),
+			net: RefCell::new(net),
 			objects,
 			state,
 			display: RefCell::new(None),
@@ -151,6 +159,20 @@ impl Client {
 		} else {
 			log::error!("Tried to add global before client's registry was initialized");
 		}
+	}
+
+	// TODO: change all of the client_map-specific function signatures to look like this
+	pub fn try_send_event<I: Interface>(&self, object: Handle<Object>, event: I::Event) -> Result<(), SendEventError> where I::Event: Message<ClientMap=ClientMap> + fmt::Debug {
+		let object = object.get().ok_or(SendEventError::SenderMissing)?;
+
+		let client_map = self.client_map();
+		let (opcode, args) = event.into_args(client_map)?;
+		let dyn_msg = DynMessage::new(object.id, opcode, args);
+		let raw = dyn_msg.into_raw()?;
+
+		self.net.borrow_mut().try_send_message(raw)?;
+
+		Ok(())
 	}
 
 	pub fn find<I: Interface, F: Fn(Resource<I>) -> bool>(&self, f: F) -> Option<Resource<I>> {

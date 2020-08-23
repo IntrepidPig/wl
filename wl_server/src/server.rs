@@ -20,45 +20,15 @@ use loaner::{Owner, Handle};
 use thiserror::{Error};
 
 use wl_common::{
-	wire::{MessageHeader, RawMessage, RawMessageReader, SerializeRawError, ParseDynError},
+	wire::{RawMessageReader, SerializeRawError, ParseDynError},
 	interface::{Interface, IntoArgsError},
 };
 
 use crate::{
+	net::{NetServer, NetError},
 	client::{Client, ClientManager},
 	global::{GlobalImplementation, GlobalManager, Global},
 };
-
-pub enum ServerMessage {
-	NewClient(UnixStream),
-}
-
-#[derive(Debug, Error)]
-pub enum ServerError {
-	#[error("Failed to create wayland server")]
-	SocketBind(#[from] ServerCreateError),
-	#[error("Failed to accept connection from client")]
-	AcceptError(#[source] io::Error),
-	#[error("Failed to parse data as a message")]
-	InvalidMessage,
-	#[error("Could not convert message arguments to a request")]
-	InvalidArguments(#[from] ParseDynError),
-	#[error("An unknown IO error occurred")]
-	UnknownIoError(#[from] io::Error),
-	#[error("A client sent a request to an object that doesn't exist")]
-	RequestReceiverDoesntExist,
-}
-
-#[derive(Debug, Error)]
-pub enum ServerCreateError {
-	#[error("Failed to bind wayland server socket")]
-	SocketBind(#[source] io::Error),
-	#[error("An unknown IO error occurred")]
-	UnknownIoError(#[from] io::Error),
-}
-
-const MAX_MESSAGE_SIZE: usize = 4096;
-const MAX_FDS: usize = 16;
 
 pub struct State {
 	inner: Box<dyn Any>,
@@ -90,18 +60,15 @@ impl State {
 
 pub struct Server {
 	pub state: State,
-	listener: UnixListener,
+	net: NetServer,
 	client_manager: Owner<RefCell<ClientManager>>,
 	global_manager: Owner<RefCell<GlobalManager>>,
-	msg_buf: Box<[u8; MAX_MESSAGE_SIZE]>,
 	next_serial: u32,
 }
 
 impl Server {
 	pub fn new<S: 'static>(state: S) -> Result<Self, ServerCreateError> {
-		let listener = UnixListener::bind("/run/user/1000/wayland-0")
-			.map_err(|e| ServerCreateError::SocketBind(e))?;
-		listener.set_nonblocking(true)?;
+		let net = NetServer::new()?;
 
 		let client_manager = Owner::new(RefCell::new(ClientManager::new()));
 		let global_manager = Owner::new(RefCell::new(GlobalManager::new(client_manager.handle())));
@@ -112,10 +79,9 @@ impl Server {
 
 		Ok(Self {
 			state,
-			listener,
+			net,
 			client_manager,
 			global_manager,
-			msg_buf: Box::new([0u8; MAX_MESSAGE_SIZE]),
 			next_serial: 1,
 		})
 	}
@@ -135,13 +101,17 @@ impl Server {
 	}
 
 	pub fn dispatch<S: 'static, F: FnMut(Handle<Client>) -> S>(&mut self, mut client_state_creator: F) -> Result<(), ServerError> {
+		self.client_manager.borrow().flush_clients()?;
+
 		match self.try_accept(&mut client_state_creator) {
 			Ok(Some(_)) => log::info!("Client connected"),
 			Ok(None) => {},
 			Err(e) => log::error!("Client connection error: {:?}", e),
 		}
 		
-		if let Some((client_handle, raw_message)) = self.try_next_raw_message()? {
+		if let Some((client_handle, raw_message)) = self.net.poll_clients(&mut *self.client_manager.borrow_mut())? {
+			log::trace!("Raw message: {}:{} {:?} ({:?})", raw_message.header.sender, raw_message.header.opcode, raw_message.data, raw_message.fds);
+
 			let client = client_handle.get().expect("Client was destroyed");
 			let resource = match client.find_by_id_untyped(raw_message.header.sender) {
 				Some(resource) => resource,
@@ -173,93 +143,13 @@ impl Server {
 	}
 
 	pub fn try_accept<S: 'static, F: FnOnce(Handle<Client>) -> S>(&mut self, state_creator: F) -> Result<Option<Handle<Client>>, ServerError> {
-		if let Some(stream) = self.try_accept_stream()? {
-			let handle = self.client_manager.borrow_mut().create_client(stream, ());
+		if let Some(net) = self.net.try_accept()? {
+			let handle = self.client_manager.borrow_mut().create_client(net, ());
 			handle.get().unwrap().set_state(state_creator(handle.clone()));
 			Ok(Some(handle))
 		} else {
 			Ok(None)
 		}
-	}
-
-	fn try_accept_stream(&mut self) -> Result<Option<UnixStream>, ServerError> {
-		match self.listener.accept() {
-			Ok((stream, _addr)) => {
-				Ok(Some(stream))
-			},
-			Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-				Ok(None)
-			},
-			Err(e) => {
-				Err(ServerError::AcceptError(e))
-			},
-		}
-	}
-
-	fn try_next_raw_message(&mut self) -> Result<Option<(Handle<Client>, RawMessage)>, ServerError> {
-		use nix::{
-			sys::{socket, uio::IoVec},
-			poll,
-		};
-
-		let poll_targets = self.client_manager.borrow().clients
-			.iter()
-			.map(|client| {
-				(client.handle(), client.stream.borrow().as_raw_fd())
-			})
-			.collect::<Vec<_>>();
-		let mut pollfds = poll_targets.iter().map(|t| poll::PollFd::new(t.1, poll::PollFlags::POLLIN)).collect::<Vec<_>>();
-		poll::poll(&mut pollfds, 0).map_err(|e| {
-			log::error!("Polling fds failed: {}", e);
-		}).unwrap();
-
-		let mut cmsg_buffer = nix::cmsg_space!([RawFd; MAX_FDS]);
-
-		for (i, (client_handle, _)) in poll_targets.iter().enumerate() {
-			let pollfd = &pollfds[i];
-			if pollfd.revents().map(|revents| !(revents & poll::PollFlags::POLLIN).is_empty()).unwrap_or(false) {
-				if !(pollfd.revents().unwrap() & poll::PollFlags::POLLHUP).is_empty() {
-					// TODO: destroy client, and watch for borrow_mut panics
-					self.client_manager.borrow_mut().destroy_client(client_handle.clone());
-					log::trace!("Client {:?} disconnected", client_handle);
-					continue;
-				}
-
-				let fd = pollfd.fd();
-				cmsg_buffer.clear();
-				
-				let mut header_buf = [0u8; 8];
-				let iovec = IoVec::from_mut_slice(&mut header_buf);
-				let flags = socket::MsgFlags::MSG_PEEK | socket::MsgFlags::MSG_DONTWAIT;
-				let recv = socket::recvmsg(fd, &[iovec], None, flags).unwrap();
-				if recv.bytes != 8 {
-					log::error!("Header read returned {} bytes instead of 8", recv.bytes);
-					return Err(ServerError::InvalidMessage)
-				}
-				let msg_header = MessageHeader::from_bytes(&header_buf).unwrap();
-
-				let iovec = IoVec::from_mut_slice(&mut self.msg_buf[..msg_header.msg_size as usize]);
-				let flags = socket::MsgFlags::MSG_CMSG_CLOEXEC | socket::MsgFlags::MSG_DONTWAIT;
-				let recv = socket::recvmsg(fd, &[iovec], Some(&mut cmsg_buffer), flags).unwrap();
-				let buf = &self.msg_buf[..recv.bytes];
-				let mut fds = Vec::new();
-				let _ = recv.cmsgs().map(|cmsg| match cmsg {
-					socket::ControlMessageOwned::ScmRights(fds_) => fds.extend_from_slice(&fds_),
-					_ => {},
-				}).collect::<()>();
-				let raw = match RawMessage::from_data(buf, fds).map_err(|_| ServerError::InvalidMessage) {
-					Ok(raw) => raw,
-					Err(e) => {
-						log::error!("Failed to read message from client: {}", e);
-						continue;
-					}
-				};
-
-				return Ok(Some((client_handle.clone(), raw)));
-			}
-		}
-
-		Ok(None)
 	}
 	
 	// TODO: wonder about serials
@@ -276,6 +166,28 @@ impl Server {
 }
 
 #[derive(Debug, Error)]
+pub enum ServerError {
+	#[error("Failed to create wayland server\n\t{0}")]
+	CreateError(#[from] ServerCreateError),
+	#[error(transparent)]
+	NetError(#[from] NetError),
+	#[error("Could not convert message arguments to a request\n\t{0}")]
+	InvalidArguments(#[from] ParseDynError),
+	#[error("An unknown IO error occurred\n\t{0}")]
+	UnknownIoError(#[from] io::Error),
+	#[error("A client sent a request to an object that doesn't exist")]
+	RequestReceiverDoesntExist,
+}
+
+#[derive(Debug, Error)]
+pub enum ServerCreateError {
+	#[error(transparent)]
+	NetError(#[from] NetError),
+	#[error("An unknown IO error occurred")]
+	UnknownIoError(#[from] io::Error),
+}
+
+#[derive(Debug, Error)]
 pub enum SendEventError {
 	#[error(transparent)]
 	IntoArgsError(#[from] IntoArgsError),
@@ -286,5 +198,5 @@ pub enum SendEventError {
 	#[error("The sender referred to does not exist")]
 	SenderMissing,
 	#[error(transparent)]
-	Io(#[from] io::Error),
+	Net(#[from] NetError),
 }

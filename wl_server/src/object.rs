@@ -95,7 +95,7 @@ pub(crate) struct Dispatcher {
 }
 
 impl Dispatcher {
-	pub fn new<I, R, T>(implementation: T) -> Self where R: Message<ClientMap=ClientMap>, I: Interface<Request=R> + 'static, T: ObjectImplementation<I> + 'static {
+	pub fn new<I: Interface + 'static, T: ObjectImplementation<I> + 'static>(implementation: T) -> Self where I::Request: Message<ClientMap=ClientMap> + fmt::Debug {
 		let raw_obj_implementation: Box<dyn RawObjectImplementation> = Box::new(RawObjectImplementationConcrete::<I> {
 			_phantom: std::marker::PhantomData,
 			typed_implementation: Box::new(implementation),
@@ -158,7 +158,7 @@ pub struct RawObjectImplementationConcrete<I> {
 	typed_implementation: Box<dyn ObjectImplementation<I>>,
 }
 
-impl<R, I> RawObjectImplementation for RawObjectImplementationConcrete<I> where R: Message<ClientMap=ClientMap>, I: Interface<Request=R> {
+impl<I: Interface> RawObjectImplementation for RawObjectImplementationConcrete<I> where I::Request: Message<ClientMap=ClientMap> + fmt::Debug {
 	fn dispatch(&mut self, state: &mut State, this: Resource<Untyped>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError> {
 		let typed_resource = this.downcast::<I>().ok_or(DispatchError::TypeMismatch)?;
 		let client_map = this.client().get().unwrap().client_map();

@@ -1,13 +1,11 @@
 use std::{
 	fmt,
-	io::{Write}, marker::PhantomData,
+	marker::PhantomData,
 };
 
-use byteorder::{WriteBytesExt, NativeEndian};
 use loaner::{Owner, Handle, Ref};
 
 use wl_common::{
-	wire::{DynMessage},
 	interface::{Interface, InterfaceDebug, Message},
 };
 
@@ -74,7 +72,7 @@ impl<I: Interface> Resource<I> {
 	}
 }
 
-impl<I, R> Resource<I> where R: Message<ClientMap=ClientMap>, I: Interface<Request=R> + 'static {
+impl<I: Interface + 'static> Resource<I> where I::Request: Message<ClientMap=ClientMap> + fmt::Debug {
 	pub fn set_implementation<Impl: ObjectImplementation<I> + 'static>(&self, implementation: Impl) {
 		let dispatcher = Dispatcher::new(implementation);
 		if let Some(object) = self.object.get() {
@@ -83,7 +81,7 @@ impl<I, R> Resource<I> where R: Message<ClientMap=ClientMap>, I: Interface<Reque
 	}
 }
 
-impl<I, E> Resource<I> where E: Message<ClientMap=ClientMap> + fmt::Debug, I: Interface<Event=E> {
+impl<I: Interface> Resource<I> where I::Event: Message<ClientMap=ClientMap> + fmt::Debug {
 	pub fn send_event(&self, event: I::Event) {
 		match self.try_send_event(event) {
 			Ok(_) => {},
@@ -94,22 +92,6 @@ impl<I, E> Resource<I> where E: Message<ClientMap=ClientMap> + fmt::Debug, I: In
 	}
 
 	pub fn try_send_event(&self, event: I::Event) -> Result<(), SendEventError> {
-		// TODO: move logic to net module
-
-		let client = self.client.get().ok_or(SendEventError::ClientMissing)?;
-		let object = self.object.get().ok_or(SendEventError::SenderMissing)?;
-
-		let client_map = client.client_map();
-		let args = event.into_args(client_map)?;
-
-		let dyn_msg = DynMessage::new(object.id, args.0, args.1);
-		let raw = dyn_msg.into_raw()?;
-		let mut data = Vec::with_capacity(raw.header.msg_size as usize);
-		data.write_u32::<NativeEndian>(raw.header.sender).unwrap();
-		data.write_u16::<NativeEndian>(raw.header.opcode).unwrap();
-		data.write_u16::<NativeEndian>(raw.header.msg_size).unwrap();
-		data.extend_from_slice(&raw.data);
-
 		// TODO: control with WAYLAND_DEBUG, as well is for requests received.
 		/* log::trace!(
 			" -> {interface_name}.{interface_version}@{object_id} {event:?}",
@@ -118,8 +100,9 @@ impl<I, E> Resource<I> where E: Message<ClientMap=ClientMap> + fmt::Debug, I: In
 			object_id=object.id,
 			event=event
 		); */
-
-		client.stream.borrow_mut().write_all(&data)?;
+		
+		let client = self.client.get().ok_or(SendEventError::ClientMissing)?;
+		client.try_send_event::<I>(self.object.clone(), event)?;
 
 		Ok(())
 	}
@@ -213,7 +196,7 @@ impl NewResource<Untyped> {
 	}
 }
 
-impl<I, R> NewResource<I> where R: Message<ClientMap=ClientMap>, I: Interface<Request=R> + 'static {
+impl<I: Interface + 'static> NewResource<I> where I::Request: Message<ClientMap=ClientMap> + fmt::Debug {
 	pub fn register<Impl: ObjectImplementation<I> + 'static, T: 'static>(self, data: T, implementation: Impl) -> Resource<I> {
 		if let Some(object) = self.object.get() {
 			let dispatcher = Dispatcher::new(implementation);
