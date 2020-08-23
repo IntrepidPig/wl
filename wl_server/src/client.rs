@@ -9,7 +9,7 @@ use loaner::{
 };
 
 use wl_common::{
-	interface::{Interface, Message, IntoArgsError, InterfaceTitle}, wire::DynMessage,
+	interface::{Interface, Message, IntoArgsError, InterfaceTitle}, wire::{DynMessage},
 };
 
 use crate::{
@@ -60,13 +60,8 @@ impl ClientManager {
 		handle
 	}
 
-	pub fn destroy_client(&mut self, handle: Handle<Client>) {
-		if let Some(idx) = self.clients.iter().enumerate().find(|(_i, owner)| {
-			handle.is(&owner.handle())
-		}).map(|(i, _owner)| i) {
-			let owner = self.clients.remove(idx);
-			drop(owner);
-		}
+	pub fn remove_client(&mut self, handle: Handle<Client>) -> Option<Owner<Client>> {
+		self.clients.iter().position(|owner| owner.handle().is(&handle)).map(|position| self.clients.remove(position))
 	}
 
 	pub fn flush_clients(&self) -> Result<bool, NetError> {
@@ -115,6 +110,7 @@ impl Client {
 
 		let display = partial.find_by_id::<WlDisplay>(1).unwrap();
 		display.set_implementation(WlDisplayImplementation);
+		*partial.display.borrow_mut() = Some(display);
 
 		partial
 	}
@@ -175,6 +171,16 @@ impl Client {
 		Ok(())
 	}
 
+	pub(crate) fn remove_object(&self, object: Ref<Object>) -> Option<Owner<Object>> {
+		let owner = self.objects.borrow_mut().remove(object.handle());
+		let display = self.display.borrow().clone().expect("Client display not set");
+		let delete_id_event = wl_display::DeleteIdEvent {
+			id: object.id,
+		};
+		display.send_event(WlDisplayEvent::DeleteId(delete_id_event));
+		owner
+	}
+
 	pub fn find<I: Interface, F: Fn(Resource<I>) -> bool>(&self, f: F) -> Option<Resource<I>> {
 		// FUNKTIONAL (and scary)
 		self.find_untyped(|resource| {
@@ -186,8 +192,8 @@ impl Client {
 		self.objects.borrow().find(|object| {
 			let resource = Resource::new_untyped(self.handle(), object.handle());
 			f(resource)
-		}).map(|object_handle| {
-			Resource::new_untyped(self.handle(), object_handle)
+		}).map(|object| {
+			Resource::new_untyped(self.handle(), object.handle())
 		})
 	}
 
@@ -263,7 +269,7 @@ impl ObjectImplementation<WlDisplay> for WlDisplayImplementation {
     fn handle(&mut self, _state: &mut State, this: Resource<WlDisplay>, request: WlDisplayRequest) {
         match request {
 			WlDisplayRequest::Sync(sync) => {
-				let callback = sync.callback.register_fn((), |_, _, _| { });
+				let callback = sync.callback.register_fn((), |_, _, _| { }, |_, _| { });
 				callback.send_event(WlCallbackEvent::Done(wl_callback::DoneEvent {
 					callback_data: 1, // TODO!: serial
 				}));
@@ -276,7 +282,11 @@ impl ObjectImplementation<WlDisplay> for WlDisplayImplementation {
 				client.advertise_current_globals();
 			},
 		}
-    }
+	}
+	
+	fn handle_destructor(&mut self, _state: &mut State, _this: Resource<WlDisplay>) {
+		
+	}
 }
 
 pub struct WlRegistryImplementation;
@@ -292,5 +302,9 @@ impl ObjectImplementation<WlRegistry> for WlRegistryImplementation {
 				global_manager.bind_global(bind.name, bind.id);
 			}
 		}
-    }
+	}
+	
+	fn handle_destructor(&mut self, _state: &mut State, _this: Resource<WlRegistry>) {
+		
+	}
 }

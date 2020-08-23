@@ -20,10 +20,21 @@ use crate::{
 };
 use byteorder::{WriteBytesExt, NativeEndian};
 
-const MAX_MESSAGE_SIZE: usize = 4096;
+const MAX_MESSAGE_SIZE: usize = 1024 * 16; // 16 KiB
 const MAX_FDS: usize = 8;
 const RECV_TRIES: u32 = 2;
 const FLUSH_TRIES: u32 = 2;
+
+pub(crate) struct ClientEvent {
+	pub client: Handle<Client>,
+	pub payload: ClientEventPayload,
+}
+
+pub(crate) enum ClientEventPayload {
+	ClientDisconnected,
+	Message(RawMessage),
+}
+
 
 #[derive(Debug)]
 pub struct NetServer {
@@ -55,7 +66,7 @@ impl NetServer {
 		}
 	}
 
-	pub fn poll_clients(&mut self, client_manager: &mut ClientManager) -> Result<Option<(Handle<Client>, RawMessage)>, NetError> {
+	pub(crate) fn poll_clients(&mut self, client_manager: &mut ClientManager) -> Result<Option<ClientEvent>, NetError> {
 		let poll_targets = client_manager.clients
 			.iter()
 			.map(|client| {
@@ -70,9 +81,10 @@ impl NetServer {
 			let pollfd = &pollfds[i];
 			if pollfd.revents().map(|revents| !(revents & poll::PollFlags::POLLIN).is_empty()).unwrap_or(false) {
 				if !(pollfd.revents().unwrap() & poll::PollFlags::POLLHUP).is_empty() {
-					client_manager.destroy_client(client_handle.clone());
-					log::trace!("Client {:?} disconnected", client_handle);
-					continue;
+					return Ok(Some(ClientEvent {
+						client: client_handle.clone(),
+						payload: ClientEventPayload::ClientDisconnected,
+					}))
 				}
 			}
 
@@ -80,7 +92,10 @@ impl NetServer {
 			let mut net_client = client.net.borrow_mut();
 
 			match net_client.try_read_message(&*client) {
-				Ok(Some(msg)) => return Ok(Some((client_handle.clone(), msg))),
+				Ok(Some(msg)) => return Ok(Some(ClientEvent {
+					client: client_handle.clone(),
+					payload: ClientEventPayload::Message(msg),
+				})),
 				Ok(None) => {},//log::error!("Received no event from client after poll"),
 				Err(e) => return Err(e),
 			}
@@ -114,13 +129,13 @@ impl NetClient {
 
 		let header = MessageHeader::from_bytes(&self.in_buffer.data[..8]).unwrap();
 
-		let object = client.objects.borrow().find(|object| object.id == header.sender).ok_or(NetError::InvalidMessage)?;
-		let object = object.get().unwrap();
+		let objects = client.objects.borrow();
+		let object = objects.find(|object| object.id == header.sender).ok_or(NetError::InvalidMessage)?;
 		let expected_fds = object.interface.get().requests[header.opcode as usize].iter().filter(|arg| arg.arg_type == ArgumentType::Fd).count();
 
 		// Read the rest of the message
 		if !self.try_fill_buffer_until(header.msg_size as usize, expected_fds, RECV_TRIES)? {
-			return Err(NetError::InvalidMessage);
+			return Err(NetError::InsufficientData);
 		}
 
 		let (data, fds) = self.in_buffer.advance(header.msg_size as usize, expected_fds);
@@ -143,7 +158,7 @@ impl NetClient {
 		if self.flush()? {
 			self.try_send_data(data, message.fds)
 		} else {
-			self.out_buffer.append(data, message.fds);
+			self.out_buffer.append(&data, &message.fds)?;
 			Ok(false)
 		}
 	}
@@ -190,14 +205,14 @@ impl NetClient {
 		Ok(match socket::sendmsg(fd, &[iovec], &[cmsg], flags, None) {
 			Ok(n) => {
 				if n > 0 {
-					self.out_buffer.append(data[n..].to_owned(), Vec::new());
+					self.out_buffer.append(&data[n..], &[])?;
 					false
 				} else {
 					true
 				}
 			},
 			Err(nix::Error::Sys(Errno::EAGAIN)) => {
-				self.out_buffer.append(data, fds);
+				self.out_buffer.append(&data, &fds)?;
 				false
 			},
 			Err(e) => return Err(NetError::SendError(e)),
@@ -258,13 +273,21 @@ impl MessageBuffer {
 		self.advance(self.data_len, self.fds.len())
 	}
 
-	fn append(&mut self, mut data: Vec<u8>, mut fds: Vec<RawFd>) {
-		self.data_len += data.len();
-		data.extend_from_slice(&self.data);
-		self.data = data;
+	fn append(&mut self, data: &[u8], fds: &[RawFd]) -> Result<(), NetError> {
+		if self.data_len + data.len() > MAX_MESSAGE_SIZE {
+			return Err(NetError::BufferFull);
+		}
+		if self.fds.len() + fds.len() > MAX_FDS {
+			return Err(NetError::BufferFull);
+		}
 
-		fds.extend_from_slice(&self.fds);
-		self.fds = fds;
+		self.data.resize(self.data_len, 0u8);
+		self.data.extend_from_slice(data);
+		self.data_len += data.len();
+
+		self.fds.extend_from_slice(fds);
+
+		Ok(())
 	}
 }
 
@@ -282,6 +305,10 @@ pub enum NetError {
 	WriteError(#[source] io::Error),
 	#[error("Failed to send message on socket\n\t{0}")]
 	SendError(#[source] nix::Error),
+	#[error("The client did not send a full message")]
+	InsufficientData,
+	#[error("Message buffers grew too large")]
+	BufferFull,
 	#[error("Failed to parse data as a message")]
 	InvalidMessage,
 }

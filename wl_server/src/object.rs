@@ -17,20 +17,18 @@ use wl_common::{
 
 use crate::{
 	server::{State},
-	client::{Client, ClientMap},
+	client::{ClientMap},
 	resource::{Resource, Untyped},
 };
 
 #[derive(Debug)]
 pub struct ObjectMap {
-	client: Option<Handle<Client>>, // TODO: ensure necessary
-	objects: Vec<Owner<Object>>,
+	pub(crate) objects: Vec<Owner<Object>>,
 }
 
 impl ObjectMap {
 	pub(crate) fn new() -> Self {
 		Self {
-			client: None,
 			objects: Vec::new(),
 		}
 	}
@@ -39,10 +37,22 @@ impl ObjectMap {
 		self.objects.push(object);
 	}
 
-	pub fn find<F: Fn(&Owner<Object>) -> bool>(&self, f: F) -> Option<Handle<Object>> {
+	pub fn remove(&mut self, handle: Handle<Object>) -> Option<Owner<Object>> {
+		if let Some(i) = self.objects.iter().position(|object| object.handle().is(&handle)) {
+			Some(self.objects.remove(i))
+		} else {
+			None
+		}
+	}
+
+	pub fn remove_any(&mut self) -> Option<Owner<Object>> {
+		self.objects.pop()
+	}
+
+	pub fn find<F: Fn(&Owner<Object>) -> bool>(&self, f: F) -> Option<Ref<Object>> {
 		self.objects.iter().find_map(|object| {
 			if f(object) {
-				Some(object.handle())
+				Some(object.custom_ref())
 			} else {
 				None
 			}
@@ -56,6 +66,7 @@ pub struct Object {
 	pub(crate) interface: Cell<DynInterface>,
 	pub(crate) dispatcher: RefCell<Option<Dispatcher>>, 
 	pub(crate) data: RefCell<Box<dyn Any>>,
+	pub(crate) destroy: Cell<bool>,
 }
 
 impl Object {
@@ -65,6 +76,7 @@ impl Object {
 			interface: Cell::new(I::as_dyn()),
 			dispatcher: RefCell::new(Some(Dispatcher::null::<I, R>())),
 			data: RefCell::new(Box::new(())),
+			destroy: Cell::new(false),
 		}
 	}
 
@@ -75,6 +87,7 @@ impl Object {
 			interface: Cell::new(DynInterface::new_anonymous()),
 			dispatcher: RefCell::new(None),
 			data: RefCell::new(Box::new(())),
+			destroy: Cell::new(false),
 		}
 	}
 
@@ -90,8 +103,19 @@ impl Object {
 	}
 }
 
+impl Drop for Object {
+	fn drop(&mut self) {
+		if let Some(ref dispatcher) = &*self.dispatcher.borrow() {
+			if !dispatcher.destroyed {
+				log::warn!("Object {} was dropped without running its destructor; Resource leaks may occur", self.id);
+			}
+		}
+	}
+}
+
 pub(crate) struct Dispatcher {
 	pub implementation: Box<dyn RawObjectImplementation>,
+	pub destroyed: bool,
 }
 
 impl Dispatcher {
@@ -102,6 +126,7 @@ impl Dispatcher {
 		});
 		Self {
 			implementation: raw_obj_implementation,
+			destroyed: false,
 		}
 	}
 
@@ -113,6 +138,10 @@ impl Dispatcher {
 			fn handle(&mut self, _state: &mut State, this: Resource<I>, request: I::Request) {
 				log::debug!("Got unhandled request for {:?}: {:?}", this, request);
 			}
+
+			fn handle_destructor(&mut self, _state: &mut State, this: Resource<I>) {
+				log::debug!("Got unhandled destructor ron for {:?}", this);
+			}
 		}
 
 		let implementation = Box::new(RawObjectImplementationConcrete::<I> {
@@ -122,11 +151,24 @@ impl Dispatcher {
 		
 		Self {
 			implementation,
+			destroyed: false,
 		}
 	}
 
 	pub fn dispatch(&mut self, state: &mut State, this: Resource<Untyped>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError> {
+		if self.destroyed {
+			return Err(DispatchError::ObjectDestroyed)
+		}
 		self.implementation.dispatch(state, this, opcode, args)
+	}
+
+	pub fn dispatch_destructor(&mut self, state: &mut State, this: Resource<Untyped>) -> Result<(), DispatchError> {
+		if self.destroyed {
+			return Err(DispatchError::ObjectDestroyed)
+		}
+		let result = self.implementation.dispatch_destructor(state, this);
+		self.destroyed = true;
+		result
 	}
 }
 
@@ -138,19 +180,17 @@ impl fmt::Debug for Dispatcher {
 	}
 }
 
+// TODO: consider passing associated object data in a typed manner to the handler here. Would be nice...
 pub trait ObjectImplementation<I: Interface> {
 	fn handle(&mut self, state: &mut State, this: Resource<I>, request: I::Request);
-}
 
-impl<I: Interface, F: FnMut(&mut State, Resource<I>, I::Request)> ObjectImplementation<I> for F {
-	fn handle(&mut self, state: &mut State, this: Resource<I>, request: I::Request) {
-        (self)(state, this, request)
-    }
+	fn handle_destructor(&mut self, state: &mut State, this: Resource<I>);
 }
-
 
 pub trait RawObjectImplementation {
 	fn dispatch(&mut self, state: &mut State, this: Resource<Untyped>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError>;
+
+	fn dispatch_destructor(&mut self, state: &mut State, this: Resource<Untyped>) -> Result<(), DispatchError>;
 }
 
 pub struct RawObjectImplementationConcrete<I> {
@@ -166,12 +206,20 @@ impl<I: Interface> RawObjectImplementation for RawObjectImplementationConcrete<I
 		self.typed_implementation.handle(state, typed_resource, request);
 		Ok(())
 	}
+
+	fn dispatch_destructor(&mut self, state: &mut State, this: Resource<Untyped>) -> Result<(), DispatchError> {
+		let typed_resource = this.downcast::<I>().ok_or(DispatchError::TypeMismatch)?;
+		self.typed_implementation.handle_destructor(state, typed_resource);
+		Ok(())
+	}
 }
 
 #[derive(Debug, Error)]
 pub enum DispatchError {
 	#[error("Attempted to dispatch a request to an object with the wrong type")]
 	TypeMismatch,
+	#[error("Attempted to dispatch to an object that was destroyed")]
+	ObjectDestroyed,
 	#[error(transparent)]
 	ArgumentError(#[from] FromArgsError),
 }

@@ -11,21 +11,33 @@ fn main() {
 	let state = State::new();
 	let mut server = Server::new(state).unwrap();
 	server.register_global::<WlCompositor, _>(|new_resource: NewResource<WlCompositor>| {
-		new_resource.register_fn((), |_state, compositor, request| {
-			dbg!(compositor);
-			dbg!(request);
-		});
+		new_resource.register_fn(
+			(),
+			|_state, compositor, request| {
+				dbg!(compositor);
+				dbg!(request);
+			},
+			|_, _| {
+				log::info!("Compositor destroyed");
+			}
+		);
 	});
 	// TODO: these required closure argument type annotations can be mitigated by adding a `register_fn` function
 	server.register_global::<WlShm, _>(|new_resource: NewResource<WlShm>| {
-		new_resource.register_fn(ShmData { }, |_state, shm: Resource<WlShm>, request| {
-			let _shm_data = shm.get_data::<ShmData>().unwrap();
-			match request {
-				WlShmRequest::CreatePool(create_pool) => {
-					dbg!(create_pool);
-				},
+		new_resource.register_fn(
+			ShmData { },
+			|_state, shm: Resource<WlShm>, request| {
+				let _shm_data = shm.get_data::<ShmData>().unwrap();
+				match request {
+					WlShmRequest::CreatePool(create_pool) => {
+						dbg!(create_pool);
+					},
+				}
+			},
+			|_, _| {
+				log::info!("Shm destroyed");
 			}
-		});
+		);
 	});
 	server.run(|_this| ClientState::new()).unwrap();
 }

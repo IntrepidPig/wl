@@ -44,13 +44,17 @@ impl<I> Resource<I> {
 	}
 
 	pub fn destroy(&self) {
-		log::error!("Resource::destroy not implemented");
+		if let Some(object) = self.object.get() {
+			object.destroy.set(true);
+		}
 	}
 
-	// TODO: returning a handle is not ideal because it does not convey that there is
-	// guaranteed to be a resource behind the handle, and an unwrap will usually follow.
 	pub fn get_data<'a, T: 'static>(&'a self) -> Option<Ref<'a, T>> {
 		self.object.get()?.data.borrow().downcast_ref::<Owner<T>>().map(|owner| owner.custom_ref())
+	}
+
+	pub fn with<T, F: FnOnce(Ref<Object>) -> T>(&self, f: F) -> Option<T> {
+		self.object.get().map(f)
 	}
 
 	pub fn to_untyped(&self) -> Resource<Untyped> {
@@ -206,22 +210,28 @@ impl<I: Interface + 'static> NewResource<I> where I::Request: Message<ClientMap=
 		Resource::new(self.client, self.object)
 	}
 
-	pub fn register_fn<T: 'static, F: FnMut(&mut State, Resource<I>, I::Request) + 'static>(self, data: T, f: F) -> Resource<I> {
+	pub fn register_fn<T: 'static, F, D>(self, data: T, handler: F, destructor: D) -> Resource<I> where F: FnMut(&mut State, Resource<I>, I::Request) + 'static, D: FnMut(&mut State, Resource<I>) + 'static {
 		let implementation = ObjectImplementationFn {
-			f,
+			handler,
+			destructor,
 			_phantom: PhantomData,
 		};
 		self.register(data, implementation)
 	}
 }
 
-struct ObjectImplementationFn<I: Interface, F: FnMut(&mut State, Resource<I>, I::Request)> {
-	f: F,
+struct ObjectImplementationFn<I: Interface, F, D> where F: FnMut(&mut State, Resource<I>, I::Request) + 'static, D: FnMut(&mut State, Resource<I>) + 'static {
+	handler: F,
+	destructor: D,
 	_phantom: PhantomData<I>,
 }
 
-impl<I: Interface, F: FnMut(&mut State, Resource<I>, I::Request)> ObjectImplementation<I> for ObjectImplementationFn<I, F> {
+impl<I: Interface, F, D> ObjectImplementation<I> for ObjectImplementationFn<I, F, D> where F: FnMut(&mut State, Resource<I>, I::Request) + 'static, D: FnMut(&mut State, Resource<I>) + 'static {
 	fn handle(&mut self, state: &mut State, this: Resource<I>, request: I::Request) {
-        (self.f)(state, this, request)
+        (self.handler)(state, this, request)
+	}
+	
+	fn handle_destructor(&mut self, state: &mut State, this: Resource<I>) {
+        (self.destructor)(state, this)
     }
 }
