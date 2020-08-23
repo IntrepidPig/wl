@@ -35,21 +35,6 @@ pub trait Interface {
 	}
 }
 
-pub trait InterfaceDebug {
-	fn name(&self) -> &str;
-	fn version(&self) -> u32;
-}
-
-impl<I: Interface> InterfaceDebug for I {
-    fn name(&self) -> &str {
-        I::NAME
-    }
-    fn version(&self) -> u32 {
-        I::VERSION
-    }
-	
-}
-
 pub const ANONYMOUS_NAME: &'static str = "anonymous";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,15 +43,6 @@ pub struct DynInterface {
 	pub version: u32,
 	pub requests: MessagesDesc,
 	pub events: MessagesDesc,
-}
-
-impl InterfaceDebug for DynInterface {
-    fn name(&self) -> &str {
-        self.name.as_ref()
-    }
-    fn version(&self) -> u32 {
-        self.version
-    }
 }
 
 impl DynInterface {

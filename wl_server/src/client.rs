@@ -26,6 +26,7 @@ pub struct ClientManager {
 	pub(crate) this: Option<Handle<RefCell<ClientManager>>>,
 	pub(crate) global_manager: Option<Handle<RefCell<GlobalManager>>>,
 	pub(crate) clients: Vec<Owner<Client>>,
+	next_id: u32,
 }
 
 impl ClientManager {
@@ -34,6 +35,7 @@ impl ClientManager {
 			this: None,
 			global_manager: None,
 			clients: Vec::new(),
+			next_id: 1,
 		}
 	}
 
@@ -54,7 +56,9 @@ impl ClientManager {
 	}
 
 	pub fn create_client<S: 'static>(&mut self, net: NetClient, state: S) -> Handle<Client> {
-		let client = Client::new(self.this(), self.global_manager(), net, state);
+		let id = self.next_id;
+		self.next_id = self.next_id.wrapping_add(1);
+		let client = Client::new(id, self.this(), self.global_manager(), net, state);
 		let handle = client.handle();
 		self.clients.push(client);
 		handle
@@ -77,6 +81,7 @@ impl ClientManager {
 #[derive(Debug)]
 pub struct Client {
 	this: RefCell<Option<Handle<Client>>>, // TODO: ensure necessary
+	id: u32,
 	client_manager: Handle<RefCell<ClientManager>>,
 	global_manager: Handle<RefCell<GlobalManager>>,
 	
@@ -89,7 +94,7 @@ pub struct Client {
 }
 
 impl Client {
-	pub(crate) fn new<S: 'static>(client_manager: Handle<RefCell<ClientManager>>, global_manager: Handle<RefCell<GlobalManager>>, net: NetClient, state: S) -> Owner<Self> {
+	pub(crate) fn new<S: 'static>(id: u32, client_manager: Handle<RefCell<ClientManager>>, global_manager: Handle<RefCell<GlobalManager>>, net: NetClient, state: S) -> Owner<Self> {
 		let mut objects = ObjectMap::new();
 		objects.add(Owner::new(Object::new::<WlDisplay, _>(1)));
 		let objects = Owner::new(RefCell::new(objects));
@@ -97,6 +102,7 @@ impl Client {
 
 		let partial = Owner::new(Self {
 			this: RefCell::new(None),
+			id,
 			client_manager,
 			global_manager,
 			net: RefCell::new(net),
@@ -113,6 +119,10 @@ impl Client {
 		*partial.display.borrow_mut() = Some(display);
 
 		partial
+	}
+
+	pub fn id(&self) -> u32 {
+		self.id
 	}
 
 	pub fn set_state<S: 'static>(&self, state: S) {
@@ -159,12 +169,21 @@ impl Client {
 
 	// TODO: change all of the client_map-specific function signatures to look like this
 	pub fn try_send_event<I: Interface>(&self, object: Handle<Object>, event: I::Event) -> Result<(), SendEventError> where I::Event: Message<ClientMap=ClientMap> + fmt::Debug {
+		let resource = Resource::<I>::new(self.this.borrow().clone().unwrap(), object.clone());
+		if crate::server::event_debug() {
+			log::debug!(" -> {:?} {:?}", resource, event);
+		}
+
 		let object = object.get().ok_or(SendEventError::SenderMissing)?;
 
 		let client_map = self.client_map();
 		let (opcode, args) = event.into_args(client_map)?;
 		let dyn_msg = DynMessage::new(object.id, opcode, args);
 		let raw = dyn_msg.into_raw()?;
+
+		if crate::server::raw_event_debug() {
+			log::debug!(" -> client: {}, sender: {}, opcode: {}, len: {}\n\tcontents: {:?}", self.id(), raw.header.sender, raw.header.opcode, raw.header.msg_size, raw.data);
+		}
 
 		self.net.borrow_mut().try_send_message(raw)?;
 

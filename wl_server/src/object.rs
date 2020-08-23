@@ -49,6 +49,10 @@ impl ObjectMap {
 		self.objects.pop()
 	}
 
+	pub fn next_pending_destroy(&mut self) -> Option<Owner<Object>> {
+		self.objects.iter().position(|object| object.destroy.get()).map(|position| self.objects.remove(position))
+	}
+
 	pub fn find<F: Fn(&Owner<Object>) -> bool>(&self, f: F) -> Option<Ref<Object>> {
 		self.objects.iter().find_map(|object| {
 			if f(object) {
@@ -203,6 +207,11 @@ impl<I: Interface> RawObjectImplementation for RawObjectImplementationConcrete<I
 		let typed_resource = this.downcast::<I>().ok_or(DispatchError::TypeMismatch)?;
 		let client_map = this.client().get().unwrap().client_map();
 		let request = I::Request::from_args(client_map, opcode, args)?;
+
+		if crate::server::request_debug() {
+			log::debug!("{:?} {:?}", this, request);
+		}
+
 		self.typed_implementation.handle(state, typed_resource, request);
 		Ok(())
 	}

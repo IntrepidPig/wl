@@ -6,7 +6,7 @@ use std::{
 use loaner::{Owner, Handle, Ref};
 
 use wl_common::{
-	interface::{Interface, InterfaceDebug, Message},
+	interface::{Interface, Message},
 };
 
 use crate::{
@@ -140,29 +140,24 @@ impl Resource<Untyped> {
 	}
 }
 
-impl<I: InterfaceDebug> fmt::Debug for Resource<I> {
+impl<I> fmt::Debug for Resource<I> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "Resource<{}:{}>@{}", self.interface.name(), self.interface.version(), if let Some(object) = self.object.get() {
-			format!("{}", object.id)
-		} else {
-			format!("<dead>")
-		})
-	}
-}
-
-/* impl fmt::Debug for Resource<DynInterface> {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "Resource<(dyn){}:{}>@({:?}.{:?})", self.interface.name, self.interface.version, self.client.0, self.object.0)
-	}
-} */
-
-impl fmt::Debug for Resource<Untyped> {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "Resource<(untyped)>@{}", if let Some(object) = self.object.get() {
-			format!("{}", object.id)
-		} else {
-			format!("<dead>")
-		})
+		match (self.client.get(), self.object.get()) {
+			(Some(client), Some(object)) => {
+				let interface = object.interface.get();
+				write!(f, "Resource@{}({}@{})", client.id(), interface.name, object.id)
+			},
+			(None, Some(object)) => {
+				let interface = object.interface.get();
+				write!(f, "Resource@<dead>({}@{})", interface.name, object.id)
+			},
+			(Some(client), None) => {
+				write!(f, "Resource@{}(<dead>)", client.id())
+			},
+			(None, None) => {
+				write!(f, "Resource@<dead>(<dead>)")
+			}
+		}
 	}
 }
 

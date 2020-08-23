@@ -13,6 +13,10 @@ use std::{
 	collections::{HashMap, VecDeque},
 	cell::{RefCell},
 	any::{Any},
+	sync::{
+		atomic::{Ordering, AtomicBool},
+	},
+	env,
 	fmt,
 };
 
@@ -29,6 +33,41 @@ use crate::{
 	client::{Client, ClientManager},
 	global::{GlobalImplementation, GlobalManager, Global}, object::Object, Resource,
 };
+
+pub(crate) static REQUEST_DEBUG: AtomicBool = AtomicBool::new(false);
+pub(crate) static RAW_REQUEST_DEBUG: AtomicBool = AtomicBool::new(false);
+pub(crate) static EVENT_DEBUG: AtomicBool = AtomicBool::new(false);
+pub(crate) static RAW_EVENT_DEBUG: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn request_debug() -> bool { REQUEST_DEBUG.load(Ordering::Relaxed) }
+pub(crate) fn raw_request_debug() -> bool { RAW_REQUEST_DEBUG.load(Ordering::Relaxed) }
+pub(crate) fn event_debug() -> bool { EVENT_DEBUG.load(Ordering::Relaxed) }
+pub(crate) fn raw_event_debug() -> bool { RAW_EVENT_DEBUG.load(Ordering::Relaxed) }
+
+fn set_debug_switches() {
+	if let Some(var) = env::var_os("WL_DEBUG") {
+		REQUEST_DEBUG.store(true, Ordering::Relaxed);
+		EVENT_DEBUG.store(true, Ordering::Relaxed);
+		if var == "raw" {
+			RAW_REQUEST_DEBUG.store(true, Ordering::Relaxed);
+			RAW_EVENT_DEBUG.store(true, Ordering::Relaxed);
+		}
+	}
+
+	if let Some(var) = env::var_os("WL_REQUEST_DEBUG") {
+		REQUEST_DEBUG.store(true, Ordering::Relaxed);
+		if var == "raw" {
+			RAW_REQUEST_DEBUG.store(true, Ordering::Relaxed);
+		}
+	}
+
+	if let Some(var) = env::var_os("WL_EVENT_DEBUG") {
+		EVENT_DEBUG.store(true, Ordering::Relaxed);
+		if var == "raw" {
+			RAW_EVENT_DEBUG.store(true, Ordering::Relaxed);
+		}
+	}
+}
 
 pub struct State {
 	inner: Box<dyn Any>,
@@ -68,6 +107,8 @@ pub struct Server {
 
 impl Server {
 	pub fn new<S: 'static>(state: S) -> Result<Self, ServerCreateError> {
+		set_debug_switches();
+
 		let net = NetServer::new()?;
 
 		let client_manager = Owner::new(RefCell::new(ClientManager::new()));
@@ -104,7 +145,7 @@ impl Server {
 		self.client_manager.borrow().flush_clients()?;
 
 		match self.try_accept(&mut client_state_creator) {
-			Ok(Some(_)) => log::info!("Client connected"),
+			Ok(Some(client)) => log::info!("Client {} connected", client.id()),
 			Ok(None) => {},
 			Err(e) => log::error!("Client connection error: {:?}", e),
 		}
@@ -121,17 +162,24 @@ impl Server {
 			}
 		}
 
+		self.destroy_pending();
+
 		Ok(())
 	}
 
 	pub fn handle_client_disconnect(&mut self, client: Ref<Client>) -> Result<(), ServerError> {
+		log::info!("Client {} disconnected", client.id());
 		self.cleanup_client(client)?;
 
 		Ok(())
 	}
 
-	pub fn handle_client_message(&mut self, client: Ref<Client>, raw_message: RawMessage) -> Result<(), ServerError> {
-		let resource = match client.find_by_id_untyped(raw_message.header.sender) {
+	pub fn handle_client_message(&mut self, client: Ref<Client>, raw: RawMessage) -> Result<(), ServerError> {
+		if raw_request_debug() {
+			log::debug!("client: {}, sender: {}, opcode: {}, len: {}\n\tcontents: {:?}", client.id(), raw.header.sender, raw.header.opcode, raw.header.msg_size, raw.data);
+		}
+
+		let resource = match client.find_by_id_untyped(raw.header.sender) {
 			Some(resource) => resource,
 			None => return Err(ServerError::RequestReceiverDoesntExist),
 		};
@@ -139,9 +187,9 @@ impl Server {
 		// This will fail if the client has sent a request before learning of the object's destruction
 		let object = object_handle.get().ok_or(ServerError::RequestReceiverDoesntExist)?;
 
-		let reader = RawMessageReader::new(&raw_message);
-		let opcode = raw_message.header.opcode;
-		let args = wl_common::wire::DynMessage::parse_dyn_args(object.interface.get().requests[raw_message.header.opcode as usize], reader)?;
+		let reader = RawMessageReader::new(&raw);
+		let opcode = raw.header.opcode;
+		let args = wl_common::wire::DynMessage::parse_dyn_args(object.interface.get().requests[raw.header.opcode as usize], reader)?;
 
 		// wtf
 		if false {} else {
@@ -163,7 +211,7 @@ impl Server {
 		
 		Ok(())
 	}
-	
+
 	pub(crate) fn cleanup_client(&mut self, client: Ref<Client>) -> Result<(), ServerError> {
 		while let Some(object) = client.objects.borrow_mut().remove_any() {
 			self.run_object_destructor(client.clone(), object.custom_ref());
@@ -172,6 +220,18 @@ impl Server {
 		let _ = self.client_manager.borrow_mut().remove_client(client.handle());
 		
 		Ok(())
+	}
+
+	fn destroy_pending(&mut self) {
+		// This is written funny to bypass the borrow checker. It would probably be more friendly to the compile
+		// and better in general to make `run_object_destructor` a method of Object.
+		let client_count = self.client_manager.borrow().clients.len();
+		for i in 0..client_count {
+			let client = self.client_manager.borrow().clients[i].custom_ref();
+			while let Some(object) = client.objects.borrow_mut().next_pending_destroy() {
+				self.run_object_destructor(client.clone(), object.custom_ref());
+			}
+		}
 	}
 
 	pub(crate) fn destroy_object(&mut self, client: Ref<Client>, object: Ref<Object>) {
@@ -191,11 +251,11 @@ impl Server {
 		}
 	}
 
-	pub fn try_accept<S: 'static, F: FnOnce(Handle<Client>) -> S>(&mut self, state_creator: F) -> Result<Option<Handle<Client>>, ServerError> {
+	pub fn try_accept<S: 'static, F: FnOnce(Handle<Client>) -> S>(&mut self, state_creator: F) -> Result<Option<Ref<Client>>, ServerError> {
 		if let Some(net) = self.net.try_accept()? {
 			let handle = self.client_manager.borrow_mut().create_client(net, ());
 			handle.get().unwrap().set_state(state_creator(handle.clone()));
-			Ok(Some(handle))
+			Ok(Some(handle.upgrade().unwrap().custom_ref()))
 		} else {
 			Ok(None)
 		}
@@ -210,7 +270,12 @@ impl Server {
 	}
 
 	pub fn print_debug_info(&self) {
-		log::debug!("Debugging too difficult lmao");
+		for client in &self.client_manager.borrow().clients {
+			eprintln!("Client {}:", client.id());
+			for object in &client.objects.borrow().objects {
+				eprintln!("\t{}@{}", object.interface.get().name, object.id);
+			}
+		}
 	}
 }
 
