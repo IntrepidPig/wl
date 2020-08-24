@@ -20,9 +20,15 @@ use crate::{
 };
 use byteorder::{WriteBytesExt, NativeEndian};
 
-const MAX_MESSAGE_SIZE: usize = 1024 * 16; // 16 KiB
+/// Maximum amount of bytes that can be buffered 
+const DATA_BUFFER_SIZE: usize = 1024 * 16; // 16 KiB
+/// Maximum amount of file descriptors that can be buffered
+const FD_BUFFER_SIZE: usize = 16;
+/// Maximum amount of file descriptors that can be received in a single message
 const MAX_FDS: usize = 8;
+/// How many times to try receiving data after a header before returning an error
 const RECV_TRIES: u32 = 2;
+/// How many times to try sending data before returning an error
 const FLUSH_TRIES: u32 = 2;
 
 pub(crate) struct ClientEvent {
@@ -245,9 +251,9 @@ struct MessageBuffer {
 impl MessageBuffer {
 	fn new() -> Self {
 		Self {
-			data: vec![0u8; MAX_MESSAGE_SIZE],
+			data: vec![0u8; DATA_BUFFER_SIZE],
 			data_len: 0,
-			fds: Vec::new(),
+			fds: Vec::with_capacity(FD_BUFFER_SIZE),
 		}
 	}
 
@@ -259,8 +265,8 @@ impl MessageBuffer {
 		let data_left = self.data.split_off(data_len);
 		let data = std::mem::replace(&mut self.data, data_left);
 		self.data_len -= data_len;
-		if self.data.len() < MAX_MESSAGE_SIZE {
-			self.data.resize(MAX_MESSAGE_SIZE, 0u8);
+		if self.data.len() < DATA_BUFFER_SIZE {
+			self.data.resize(DATA_BUFFER_SIZE, 0u8);
 		}
 
 		let fds_left = self.fds.split_off(fd_count);
@@ -274,10 +280,10 @@ impl MessageBuffer {
 	}
 
 	fn append(&mut self, data: &[u8], fds: &[RawFd]) -> Result<(), NetError> {
-		if self.data_len + data.len() > MAX_MESSAGE_SIZE {
+		if self.data_len + data.len() > DATA_BUFFER_SIZE {
 			return Err(NetError::BufferFull);
 		}
-		if self.fds.len() + fds.len() > MAX_FDS {
+		if self.fds.len() + fds.len() > FD_BUFFER_SIZE {
 			return Err(NetError::BufferFull);
 		}
 
