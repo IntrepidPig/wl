@@ -8,7 +8,7 @@ pub mod net;
 pub use loaner;
 
 pub use crate::{
-	server::{Server},
+	server::{Server, ServerError, ServerCreateError},
 	client::{Client},
 	resource::{Resource, NewResource, Untyped},
 	global::{Global},
