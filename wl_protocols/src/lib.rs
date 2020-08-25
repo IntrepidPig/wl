@@ -5,7 +5,7 @@ macro_rules! define_protocol {
 				#[allow(unused)]
 				pub(in self) use wl_server::{
 					client::{ClientMap},
-					resource::{Resource, NewResource, Untyped},
+					resource::{Resource, NewResource, Anonymous},
 					protocol::*,
 				};
 

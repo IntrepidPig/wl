@@ -179,7 +179,7 @@ impl Server {
 			log::debug!("client: {}, sender: {}, opcode: {}, len: {}\n\tcontents: {:?}", client.id(), raw.header.sender, raw.header.opcode, raw.header.msg_size, raw.data);
 		}
 
-		let resource = match client.find_by_id_untyped(raw.header.sender) {
+		let resource = match client.find_by_id_anonymous(raw.header.sender) {
 			Some(resource) => resource,
 			None => return Err(ServerError::RequestReceiverDoesntExist),
 		};
@@ -241,7 +241,7 @@ impl Server {
 
 	fn run_object_destructor(&mut self, client: Ref<Client>, object: Ref<Object>) {
 		if let Some(ref mut dispatcher) = *object.dispatcher.borrow_mut() {
-			let resource = Resource::new_untyped(client.handle(), object.handle());
+			let resource = Resource::new_anonymous(client.handle(), object.handle());
 			match dispatcher.dispatch_destructor(&mut self.state, resource) {
 				Ok(()) => {},
 				Err(e) => {

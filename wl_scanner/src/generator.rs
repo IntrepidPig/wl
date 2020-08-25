@@ -165,7 +165,7 @@ fn generate_argument_type(argument: &ArgumentDesc) -> TokenStream {
 				let interface = Ident::new(interface, Span::call_site());
 				quote!(super::#interface::#interface_name)
 			} else {
-				quote!(Untyped)
+				quote!(Anonymous)
 			};
 			if argument.allow_null {
 				quote!(Option<Resource<#interface>>)
@@ -179,7 +179,7 @@ fn generate_argument_type(argument: &ArgumentDesc) -> TokenStream {
 				let interface = Ident::new(interface, Span::call_site());
 				quote!(super::#interface::#interface_name)
 			} else {
-				quote!(Untyped)
+				quote!(Anonymous)
 			};
 			quote!(NewResource<#interface>)
 		},
@@ -450,7 +450,7 @@ fn generate_message_parser(interface: &InterfaceDesc, message: &MessageDesc, sid
 					}
 				} else {
 					quote! {
-						let #val = reader.next_object()?.map(|id| client_map.try_get_object_untyped(id).ok_or(FromArgsError::ResourceDoesntExist)).transpose()?;
+						let #val = reader.next_object()?.map(|id| client_map.try_get_object_anonymous(id).ok_or(FromArgsError::ResourceDoesntExist)).transpose()?;
 					}
 				};
 				let null_check = if arg.allow_null {
@@ -472,7 +472,7 @@ fn generate_message_parser(interface: &InterfaceDesc, message: &MessageDesc, sid
 				} else {
 					quote! {
 						let #val = reader.next_new_id()?.0;
-						let #val = client_map.add_new_id_untyped(#val);
+						let #val = client_map.add_new_id_anonymous(#val);
 					}
 				}
 			},

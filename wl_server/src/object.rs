@@ -18,7 +18,7 @@ use wl_common::{
 use crate::{
 	server::{State},
 	client::{ClientMap},
-	resource::{Resource, Untyped},
+	resource::{Resource, Anonymous},
 };
 
 #[derive(Debug)]
@@ -84,8 +84,8 @@ impl Object {
 		}
 	}
 
-	// This is dangerous because if any request or event is sent to this object before it leaves it's untyped state, errors will happen
-	pub fn new_untyped(id: u32) -> Self {
+	// This is dangerous because if any request or event is sent to this object before it leaves it's anonymous state, errors will happen
+	pub fn new_anonymous(id: u32) -> Self {
 		Self {
 			id,
 			interface: Cell::new(DynInterface::new_anonymous()),
@@ -159,14 +159,14 @@ impl Dispatcher {
 		}
 	}
 
-	pub fn dispatch(&mut self, state: &mut State, this: Resource<Untyped>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError> {
+	pub fn dispatch(&mut self, state: &mut State, this: Resource<Anonymous>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError> {
 		if self.destroyed {
 			return Err(DispatchError::ObjectDestroyed)
 		}
 		self.implementation.dispatch(state, this, opcode, args)
 	}
 
-	pub fn dispatch_destructor(&mut self, state: &mut State, this: Resource<Untyped>) -> Result<(), DispatchError> {
+	pub fn dispatch_destructor(&mut self, state: &mut State, this: Resource<Anonymous>) -> Result<(), DispatchError> {
 		if self.destroyed {
 			return Err(DispatchError::ObjectDestroyed)
 		}
@@ -192,9 +192,9 @@ pub trait ObjectImplementation<I: Interface> {
 }
 
 pub trait RawObjectImplementation {
-	fn dispatch(&mut self, state: &mut State, this: Resource<Untyped>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError>;
+	fn dispatch(&mut self, state: &mut State, this: Resource<Anonymous>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError>;
 
-	fn dispatch_destructor(&mut self, state: &mut State, this: Resource<Untyped>) -> Result<(), DispatchError>;
+	fn dispatch_destructor(&mut self, state: &mut State, this: Resource<Anonymous>) -> Result<(), DispatchError>;
 }
 
 pub struct RawObjectImplementationConcrete<I> {
@@ -203,7 +203,7 @@ pub struct RawObjectImplementationConcrete<I> {
 }
 
 impl<I: Interface> RawObjectImplementation for RawObjectImplementationConcrete<I> where I::Request: Message<ClientMap=ClientMap> + fmt::Debug {
-	fn dispatch(&mut self, state: &mut State, this: Resource<Untyped>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError> {
+	fn dispatch(&mut self, state: &mut State, this: Resource<Anonymous>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError> {
 		let typed_resource = this.downcast::<I>().ok_or(DispatchError::TypeMismatch)?;
 		let client_map = this.client().get().unwrap().client_map();
 		let request = I::Request::from_args(client_map, opcode, args)?;
@@ -216,7 +216,7 @@ impl<I: Interface> RawObjectImplementation for RawObjectImplementationConcrete<I
 		Ok(())
 	}
 
-	fn dispatch_destructor(&mut self, state: &mut State, this: Resource<Untyped>) -> Result<(), DispatchError> {
+	fn dispatch_destructor(&mut self, state: &mut State, this: Resource<Anonymous>) -> Result<(), DispatchError> {
 		let typed_resource = this.downcast::<I>().ok_or(DispatchError::TypeMismatch)?;
 		self.typed_implementation.handle_destructor(state, typed_resource);
 		Ok(())

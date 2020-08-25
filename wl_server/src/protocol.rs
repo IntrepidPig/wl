@@ -1,7 +1,7 @@
 mod private {
 	pub(in self) use crate::{
 		client::{ClientMap},
-		resource::{Resource, NewResource, Untyped}
+		resource::{Resource, NewResource, Anonymous}
 	};
 
 	include!(concat!(env!("OUT_DIR"), "/wayland_api.rs"));

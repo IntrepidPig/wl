@@ -11,7 +11,7 @@ use wl_common::{
 };
 
 use crate::{
-	resource::{NewResource, Untyped},
+	resource::{NewResource, Anonymous},
 	client::{ClientManager},
 };
 
@@ -52,7 +52,7 @@ impl GlobalManager {
 		handle
 	}
 
-	pub(crate) fn bind_global(&self, name: u32, this: NewResource<Untyped>) {
+	pub(crate) fn bind_global(&self, name: u32, this: NewResource<Anonymous>) {
 		if let Some(global) = self.globals.iter().find(|global| global.name == name) {
 			this.object.get().unwrap().interface.set(global.interface);
 			match global.dispatcher.borrow_mut().dispatch(this) {
@@ -103,7 +103,7 @@ impl GlobalDispatcher {
 		}
 	}
 
-	pub fn dispatch(&mut self, this: NewResource<Untyped>) -> Result<(), GlobalDispatchError> {
+	pub fn dispatch(&mut self, this: NewResource<Anonymous>) -> Result<(), GlobalDispatchError> {
 		self.implementation.dispatch(this)
 	}
 }
@@ -127,7 +127,7 @@ impl<I: Interface, F: FnMut(NewResource<I>)> GlobalImplementation<I> for F {
 }
 
 pub trait RawGlobalImplementation {
-	fn dispatch(&mut self, this: NewResource<Untyped>) -> Result<(), GlobalDispatchError>;
+	fn dispatch(&mut self, this: NewResource<Anonymous>) -> Result<(), GlobalDispatchError>;
 }
 
 pub struct RawGlobalImplementationConcrete<I: Interface> {
@@ -136,7 +136,7 @@ pub struct RawGlobalImplementationConcrete<I: Interface> {
 }
 
 impl<I: Interface> RawGlobalImplementation for RawGlobalImplementationConcrete<I> {
-    fn dispatch(&mut self, this: NewResource<Untyped>) -> Result<(), GlobalDispatchError> {
+    fn dispatch(&mut self, this: NewResource<Anonymous>) -> Result<(), GlobalDispatchError> {
 		let typed = this.downcast::<I>().ok_or(GlobalDispatchError::TypeMismatch)?;
 		self.typed_implementation.handle(typed);
 		Ok(())

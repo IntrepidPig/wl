@@ -10,7 +10,7 @@ pub use loaner;
 pub use crate::{
 	server::{Server, ServerError, ServerCreateError},
 	client::{Client},
-	resource::{Resource, NewResource, Untyped},
+	resource::{Resource, NewResource, Anonymous},
 	global::{Global},
 	object::{ObjectImplementation},
 	loaner::{Owner, Handle},

@@ -15,7 +15,7 @@ use wl_common::{
 use crate::{
 	server::{State, SendEventError},
 	net::{NetClient, NetError},
-	resource::{Resource, Untyped, NewResource},
+	resource::{Resource, Anonymous, NewResource},
 	object::{Object, ObjectMap, ObjectImplementation},
 	global::{GlobalManager},
 	protocol::*,
@@ -202,17 +202,17 @@ impl Client {
 
 	pub fn find<I: Interface, F: Fn(Resource<I>) -> bool>(&self, f: F) -> Option<Resource<I>> {
 		// FUNKTIONAL (and scary)
-		self.find_untyped(|resource| {
+		self.find_anonymous(|resource| {
 			resource.downcast().map(|resource| f(resource)).unwrap_or(false)
 		}).and_then(|resource| resource.downcast())
 	}
 
-	pub fn find_untyped<F: Fn(Resource<Untyped>) -> bool>(&self, f: F) -> Option<Resource<Untyped>> {
+	pub fn find_anonymous<F: Fn(Resource<Anonymous>) -> bool>(&self, f: F) -> Option<Resource<Anonymous>> {
 		self.objects.borrow().find(|object| {
-			let resource = Resource::new_untyped(self.handle(), object.handle());
+			let resource = Resource::new_anonymous(self.handle(), object.handle());
 			f(resource)
 		}).map(|object| {
-			Resource::new_untyped(self.handle(), object.handle())
+			Resource::new_anonymous(self.handle(), object.handle())
 		})
 	}
 
@@ -222,8 +222,8 @@ impl Client {
 		})
 	}
 
-	pub fn find_by_id_untyped(&self, id: u32) -> Option<Resource<Untyped>> {
-		self.find_untyped(|resource| {
+	pub fn find_by_id_anonymous(&self, id: u32) -> Option<Resource<Anonymous>> {
+		self.find_anonymous(|resource| {
 			resource.object().get().unwrap().id == id
 		})
 	}
@@ -248,14 +248,14 @@ impl ClientMap {
 		client.find_by_id(id)
 	}
 
-	pub fn try_get_object_untyped(&self, id: u32) -> Option<Resource<Untyped>> {
+	pub fn try_get_object_anonymous(&self, id: u32) -> Option<Resource<Anonymous>> {
 		let client = self.handle.get().expect("Client was destroyed");
-		client.find_by_id_untyped(id)
+		client.find_by_id_anonymous(id)
 	}
 
 	pub fn try_get_id<I>(&self, resource: Resource<I>) -> Result<u32, IntoArgsError> {
-		let untyped = resource.to_untyped();
-		untyped.object().get().map(|object| object.id).ok_or(IntoArgsError::ResourceDoesntExist)
+		let anonymous = resource.to_anonymous();
+		anonymous.object().get().map(|object| object.id).ok_or(IntoArgsError::ResourceDoesntExist)
 	}
 
 	pub fn add_new_id<I, R>(&self, id: u32) -> NewResource<I> where R: Message<ClientMap=ClientMap> + fmt::Debug, I: Interface<Request=R> + fmt::Debug + 'static {
@@ -268,9 +268,9 @@ impl ClientMap {
 	}
 
 	// TODO: accept InterfaceTitle?
-	pub fn add_new_id_untyped(&self, id: u32) -> NewResource<Untyped> {
+	pub fn add_new_id_anonymous(&self, id: u32) -> NewResource<Anonymous> {
 		let client = self.handle.get().expect("Client was destroyed");
-		let object = Object::new_untyped(id);
+		let object = Object::new_anonymous(id);
 		let object_owner = Owner::new(object);
 		let object_handle = object_owner.handle();
 		client.objects.borrow_mut().add(object_owner);

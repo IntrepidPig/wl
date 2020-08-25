@@ -24,7 +24,7 @@ pub struct Resource<I> {
 }
 
 #[derive(Debug, Clone)]
-pub struct Untyped;
+pub struct Anonymous;
 
 impl<I> Resource<I> {
 	pub fn interface(&self) -> &I {
@@ -57,11 +57,11 @@ impl<I> Resource<I> {
 		self.object.get().map(f)
 	}
 
-	pub fn to_untyped(&self) -> Resource<Untyped> {
+	pub fn to_anonymous(&self) -> Resource<Anonymous> {
 		Resource {
 			client: self.client.clone(),
 			object: self.object.clone(),
-			interface: Untyped,
+			interface: Anonymous,
 		}
 	}
 }
@@ -112,12 +112,12 @@ impl<I: Interface> Resource<I> where I::Event: Message<ClientMap=ClientMap> + fm
 	}
 }
 
-impl Resource<Untyped> {
-	pub(crate) fn new_untyped(client: Handle<Client>, object: Handle<Object>) -> Self {
+impl Resource<Anonymous> {
+	pub(crate) fn new_anonymous(client: Handle<Client>, object: Handle<Object>) -> Self {
 		Resource {
 			client,
 			object,
-			interface: Untyped,
+			interface: Anonymous,
 		}
 	}
 
@@ -179,7 +179,7 @@ impl<I> NewResource<I> {
 	}
 }
 
-impl NewResource<Untyped> {
+impl NewResource<Anonymous> {
 	pub(crate) fn downcast<I: Interface>(self) -> Option<NewResource<I>> {
 		let object = self.object.get()?;
 		// TODO: version/subset checking too?
