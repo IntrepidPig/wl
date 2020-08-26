@@ -282,11 +282,15 @@ fn generate_interface_impl(interface: &InterfaceDesc) -> TokenStream {
 fn generate_interface(interface: &InterfaceDesc) -> TokenStream {
 	let enum_definitions = interface.enums.iter().map(generate_enum_definition);
 
-	let request_struct_definitions = interface.requests.iter().map(|request| generate_message_struct_definition(&request.message, MessageSide::Request));
+	let request_struct_definitions = interface.requests.iter()
+		.filter(|request| !request.message.arguments.is_empty())
+		.map(|request| generate_message_struct_definition(&request.message, MessageSide::Request));
 	let requests_enum = generate_message_enum(interface, MessageSide::Request);
 	let request_impl = generate_message_impl(interface, MessageSide::Request);
 
-	let event_struct_definitions = interface.events.iter().map(|event| generate_message_struct_definition(&event.message, MessageSide::Event));
+	let event_struct_definitions = interface.events.iter()
+		.filter(|event| !event.message.arguments.is_empty())	
+		.map(|event| generate_message_struct_definition(&event.message, MessageSide::Event));
 	let events_enum = generate_message_enum(interface, MessageSide::Event);
 	let event_impl = generate_message_impl(interface, MessageSide::Event);
 	
