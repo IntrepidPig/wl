@@ -47,18 +47,60 @@ pub fn generate_api(protocol: &ProtocolDesc) -> String {
 	code.to_string()
 }
 
+fn clean_whitespace(mut input: &str) -> String {
+	let mut buf = String::with_capacity(input.len());
+
+	while !input.is_empty() {
+		if input.starts_with("\n\n") {
+			buf.push_str("\n\n");
+			input = input[2..].trim();
+		} else if input.starts_with("\n") {
+			input = input.trim();
+			buf.push_str(" ");
+		} else if input.starts_with("\t") {
+			input = input.trim();
+		} else {
+			let line = input.lines().next().unwrap();
+			buf.push_str(line);
+			input = &input[line.len()..];
+		}
+	}
+
+	buf.shrink_to_fit();
+	buf
+}
+
+fn generate_doc_attr(summary: &str, description: Option<&str>) -> TokenStream {
+	let summary = clean_whitespace(summary);
+	let description = description.map(clean_whitespace);
+	if let Some(description) = description {
+		let docs = format!("{}\n\n{}", summary, description);
+		quote! {
+			#[doc = #docs]
+		}
+	} else {
+		quote! {
+			#[doc = #summary]
+		}
+	}
+}
+
 fn generate_enum_definition(enum_desc: &EnumDesc) -> TokenStream {
 	let name = Ident::new(&snake_to_camel(&enum_desc.name), Span::call_site());
+	let docs = generate_doc_attr(&enum_desc.summary, enum_desc.description.as_deref());
 	if enum_desc.bitfield {
 		let entries = enum_desc.entries.iter().map(|entry| {
 			let entry_name = Ident::new(&sanitize_enum_variant_name(&entry.name).to_ascii_uppercase(), Span::call_site());
 			let entry_value = Literal::i32_unsuffixed(entry.value);
+			let entry_docs = generate_doc_attr(&entry.summary, None);
 			quote! {
+				#entry_docs
 				const #entry_name = #entry_value;
 			}
 		});
 		quote!(
 			bitflags! {
+				#docs
 				pub struct #name: u32 {
 					#(#entries)*
 				}
@@ -82,7 +124,8 @@ fn generate_enum_definition(enum_desc: &EnumDesc) -> TokenStream {
 		let variants = enum_desc.entries.iter().map(|entry| {
 			let entry_name = Ident::new(&sanitize_enum_variant_name(&snake_to_camel(&entry.name)), Span::call_site());
 			let entry_value = Literal::i32_unsuffixed(entry.value);
-			quote!(#entry_name = #entry_value)
+			let entry_docs = generate_doc_attr(&entry.summary, None);
+			quote!(#entry_docs #entry_name = #entry_value)
 		});
 		let from_matches = enum_desc.entries.iter().map(|entry| {
 			let entry_name = Ident::new(&sanitize_enum_variant_name(&snake_to_camel(&entry.name)), Span::call_site());
@@ -93,6 +136,7 @@ fn generate_enum_definition(enum_desc: &EnumDesc) -> TokenStream {
 		quote! {
 			#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 			#[repr(u32)]
+			#docs
 			pub enum #name {
 				#(#variants,)*
 			}
@@ -193,7 +237,8 @@ fn generate_message_struct_definition(message: &MessageDesc, side: MessageSide) 
 	let struct_fields = message.arguments.iter().map(|argument| {
 		let argument_name = Ident::new(&argument.name, Span::call_site());
 		let argument_type = generate_argument_type(argument);
-		quote!(pub #argument_name: #argument_type)
+		let argument_docs = generate_doc_attr(&argument.summary, None);
+		quote!(#argument_docs pub #argument_name: #argument_type)
 	});
 	quote! {
 		#[derive(Debug)]
@@ -215,7 +260,8 @@ fn generate_message_enum(interface: &InterfaceDesc, side: MessageSide) -> TokenS
 		let name = Ident::new(&snake_to_camel(&message.name), Span::call_site());
 		let contents_name = format_ident!("{}{}", name, side.as_str());
 		let contents = if message.arguments.is_empty() { quote!() } else { quote!((#contents_name)) };
-		quote!(#name#contents)
+		let variant_docs = generate_doc_attr(&message.summary, message.description.as_deref());
+		quote!(#variant_docs #name#contents)
 	});
 	quote! {
 		#[derive(Debug)]
@@ -298,6 +344,7 @@ fn generate_interface(interface: &InterfaceDesc) -> TokenStream {
 
 	let interface_name = Ident::new(&interface.name, Span::call_site());
 	let interface_camel_name = Ident::new(&snake_to_camel(&interface.name), Span::call_site());
+	let interface_docs = generate_doc_attr(&interface.summary, interface.description.as_deref());
 
 	quote! {
 		pub mod #interface_name {
@@ -314,6 +361,7 @@ fn generate_interface(interface: &InterfaceDesc) -> TokenStream {
 			};
 
 			#[derive(Debug, Clone, Copy)]
+			#interface_docs
 			pub struct #interface_camel_name;
 
 			#interface_impl

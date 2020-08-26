@@ -9,7 +9,7 @@ use wl_common::wire::ArgumentType;
 #[derive(Debug)]
 pub struct ProtocolDesc {
 	pub name: String,
-	pub copyright: String,
+	pub copyright: Option<String>,
 	pub interfaces: Vec<InterfaceDesc>,
 }
 
@@ -17,7 +17,7 @@ pub struct ProtocolDesc {
 pub struct InterfaceDesc {
 	pub name: String,
 	pub version: i32,
-	pub description: String,
+	pub description: Option<String>,
 	pub summary: String,
 	pub requests: Vec<RequestDesc>,
 	pub events: Vec<EventDesc>,
@@ -28,7 +28,7 @@ pub struct InterfaceDesc {
 pub struct MessageDesc {
 	pub name: String,
 	pub since: Option<i32>,
-	pub description: String,
+	pub description: Option<String>,
 	pub summary: String,
 	pub arguments: Vec<ArgumentDesc>,
 }
@@ -59,7 +59,7 @@ pub struct EnumDesc {
 	pub name: String,
 	pub bitfield: bool,
 	pub since: Option<i32>,
-	pub description: String,
+	pub description: Option<String>,
 	pub summary: String,
 	pub entries: Vec<EntryDesc>,
 }
@@ -222,7 +222,7 @@ pub enum Element {
 	Node(Node)
 }
 
-fn read_copyright(node: Node) -> Result<String, ProtocolParseError> {
+fn read_copyright(node: Node) -> Result<Option<String>, ProtocolParseError> {
 	let mut content = None;
 	for element in node.children {
 		match element {
@@ -237,7 +237,7 @@ fn read_copyright(node: Node) -> Result<String, ProtocolParseError> {
 		}
 	}
 
-	Ok(content.unwrap_or(String::new()))
+	Ok(content)
 }
 
 fn read_interface(node: Node) -> Result<InterfaceDesc, ProtocolParseError> {
@@ -296,7 +296,7 @@ fn read_interface(node: Node) -> Result<InterfaceDesc, ProtocolParseError> {
 	})
 }
 
-fn read_description(node: Node) -> Result<(String, String), ProtocolParseError> {
+fn read_description(node: Node) -> Result<(Option<String>, String), ProtocolParseError> {
 	let Node { name: _name, attributes, children} = node;
 
 	let mut description = None;
@@ -326,8 +326,6 @@ fn read_description(node: Node) -> Result<(String, String), ProtocolParseError> 
 		}
 	}
 
-	//let description = description.ok_or(ProtocolParseError::InvalidXmlError(String::from("Description has no text child")))?;
-	let description = description.unwrap_or(String::new()); // Apparently, the description of wl_keyboard.release only has a summary. Gross.
 	let summary = summary.ok_or(ProtocolParseError::InvalidXmlError(String::from("Description is missing 'summary' attribute")))?;
 
 	Ok((description, summary))
@@ -546,7 +544,7 @@ fn read_enum(node: Node) -> Result<EnumDesc, ProtocolParseError> {
 		}
 	}
 	//let (description, summary) = description.ok_or(ProtocolParseError::InvalidXmlError(String::from("Enum missing 'description' element")))?;
-	let (description, summary) = description.unwrap_or((String::new(), String::new())); // Some enums have no description (GNOME, plz stop inting)
+	let (description, summary) = description.unwrap_or((None, String::new())); // Some enums have no description (GNOME, plz stop inting)
 
 	Ok(EnumDesc {
 	    name,
