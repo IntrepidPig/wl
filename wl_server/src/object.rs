@@ -124,9 +124,9 @@ pub(crate) struct Dispatcher {
 
 impl Dispatcher {
 	pub fn new<I: Interface + 'static, T: 'static, Impl: ObjectImplementation<I, T> + 'static>(implementation: Impl) -> Self where I::Request: Message<ClientMap=ClientMap> + fmt::Debug {
-		let raw_obj_implementation: Box<dyn RawObjectImplementation> = Box::new(RawObjectImplementationConcrete::<I, T> {
+		let raw_obj_implementation: Box<dyn RawObjectImplementation> = Box::new(RawObjectImplementationConcrete::<I, T, Impl> {
 			_phantom: std::marker::PhantomData,
-			typed_implementation: Box::new(implementation),
+			typed_implementation: implementation,
 		});
 		Self {
 			implementation: raw_obj_implementation,
@@ -148,9 +148,9 @@ impl Dispatcher {
 			}
 		}
 
-		let implementation = Box::new(RawObjectImplementationConcrete::<I, ()> {
+		let implementation = Box::new(RawObjectImplementationConcrete::<I, (), _> {
 			_phantom: std::marker::PhantomData,
-			typed_implementation: Box::new(NullImpl),
+			typed_implementation: NullImpl,
 		});
 		
 		Self {
@@ -197,12 +197,12 @@ pub trait RawObjectImplementation {
 	fn dispatch_destructor(&mut self, state: &mut State, this: Resource<Anonymous, Untyped>) -> Result<(), DispatchError>;
 }
 
-pub struct RawObjectImplementationConcrete<I, T> {
-	typed_implementation: Box<dyn ObjectImplementation<I, T>>,
+pub struct RawObjectImplementationConcrete<I, T, Impl> {
+	typed_implementation: Impl,
 	_phantom: std::marker::PhantomData<(I, T)>,
 }
 
-impl<I: Interface, T: 'static> RawObjectImplementation for RawObjectImplementationConcrete<I, T> where I::Request: Message<ClientMap=ClientMap> + fmt::Debug {
+impl<I: Interface, T: 'static, Impl: ObjectImplementation<I, T>> RawObjectImplementation for RawObjectImplementationConcrete<I, T, Impl> where I::Request: Message<ClientMap=ClientMap> + fmt::Debug {
 	fn dispatch(&mut self, state: &mut State, this: Resource<Anonymous, Untyped>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError> {
 		let resource = this.downcast_both::<I, T>().ok_or(DispatchError::TypeMismatch)?;
 		let client_map = this.client().get().unwrap().client_map();
