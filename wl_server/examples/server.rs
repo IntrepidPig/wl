@@ -26,8 +26,8 @@ fn main() {
 	server.register_global::<WlShm, _>(|new_resource: NewResource<WlShm>| {
 		new_resource.register_fn(
 			ShmData { },
-			|_state, shm: Resource<WlShm>, request| {
-				let _shm_data = shm.get_data::<ShmData>().unwrap();
+			|_state, shm: Resource<WlShm, ShmData>, request| {
+				let _shm_data = shm.get_data();
 				match request {
 					WlShmRequest::CreatePool(create_pool) => {
 						dbg!(create_pool);

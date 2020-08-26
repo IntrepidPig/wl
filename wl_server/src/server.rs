@@ -179,7 +179,7 @@ impl Server {
 			log::debug!("client: {}, sender: {}, opcode: {}, len: {}\n\tcontents: {:?}", client.id(), raw.header.sender, raw.header.opcode, raw.header.msg_size, raw.data);
 		}
 
-		let resource = match client.find_by_id_anonymous(raw.header.sender) {
+		let resource = match client.find_by_id_raw(raw.header.sender) {
 			Some(resource) => resource,
 			None => return Err(ServerError::RequestReceiverDoesntExist),
 		};

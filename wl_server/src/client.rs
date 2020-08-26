@@ -15,7 +15,7 @@ use wl_common::{
 use crate::{
 	server::{State, SendEventError},
 	net::{NetClient, NetError},
-	resource::{Resource, Anonymous, NewResource},
+	resource::{Resource, Anonymous, NewResource, Untyped},
 	object::{Object, ObjectMap, ObjectImplementation},
 	global::{GlobalManager},
 	protocol::*,
@@ -89,14 +89,16 @@ pub struct Client {
 	pub(crate) objects: Owner<RefCell<ObjectMap>>, // TODO: remove from Owner,
 	pub(crate) state: RefCell<State>,
 
-	pub(crate) display: RefCell<Option<Resource<WlDisplay>>>,
-	pub(crate) registry: RefCell<Option<Resource<WlRegistry>>>,
+	pub(crate) display: RefCell<Option<Resource<WlDisplay, ()>>>,
+	pub(crate) registry: RefCell<Option<Resource<WlRegistry, ()>>>,
 }
 
 impl Client {
 	pub(crate) fn new<S: 'static>(id: u32, client_manager: Handle<RefCell<ClientManager>>, global_manager: Handle<RefCell<GlobalManager>>, net: NetClient, state: S) -> Owner<Self> {
 		let mut objects = ObjectMap::new();
-		objects.add(Owner::new(Object::new::<WlDisplay, _>(1)));
+		let display_object = Object::new::<WlDisplay>(1);
+		display_object.set_data(());
+		objects.add(Owner::new(display_object));
 		let objects = Owner::new(RefCell::new(objects));
 		let state = RefCell::new(State::new(Owner::new(state)));
 
@@ -114,7 +116,7 @@ impl Client {
 		let handle = partial.handle();
 		*partial.this.borrow_mut() = Some(handle.clone());
 
-		let display = partial.find_by_id::<WlDisplay>(1).unwrap();
+		let display = partial.find_by_id::<WlDisplay, ()>(1).unwrap();
 		display.set_implementation(WlDisplayImplementation);
 		*partial.display.borrow_mut() = Some(display);
 
@@ -169,8 +171,8 @@ impl Client {
 
 	// TODO: change all of the client_map-specific function signatures to look like this
 	pub fn try_send_event<I: Interface>(&self, object: Handle<Object>, event: I::Event) -> Result<(), SendEventError> where I::Event: Message<ClientMap=ClientMap> + fmt::Debug {
-		let resource = Resource::<I>::new(self.this.borrow().clone().unwrap(), object.clone());
 		if crate::server::event_debug() {
+			let resource = Resource::<I, Untyped>::new(self.this.borrow().clone().unwrap(), object.clone());
 			log::debug!(" -> {:?} {:?}", resource, event);
 		}
 
@@ -200,14 +202,26 @@ impl Client {
 		owner
 	}
 
-	pub fn find<I: Interface, F: Fn(Resource<I>) -> bool>(&self, f: F) -> Option<Resource<I>> {
-		// FUNKTIONAL (and scary)
-		self.find_anonymous(|resource| {
-			resource.downcast().map(|resource| f(resource)).unwrap_or(false)
-		}).and_then(|resource| resource.downcast())
+	pub fn find<I: Interface, T: 'static, F: Fn(Resource<I, T>) -> bool>(&self, f: F) -> Option<Resource<I, T>> {
+		self.find_raw(|resource| {
+			resource.downcast_both().map(|resource| f(resource)).unwrap_or(false)
+		}).and_then(|resource| resource.downcast_both())
 	}
 
-	pub fn find_anonymous<F: Fn(Resource<Anonymous>) -> bool>(&self, f: F) -> Option<Resource<Anonymous>> {
+	pub fn find_anonymous<T: 'static, F: Fn(Resource<Anonymous, T>) -> bool>(&self, f: F) -> Option<Resource<Anonymous, T>> {
+		self.find_raw(|resource| {
+			resource.downcast_data().map(|resource| f(resource)).unwrap_or(false)
+		}).and_then(|resource| resource.downcast_data())
+	}
+
+	pub fn find_untyped<I: Interface, F: Fn(Resource<I, Untyped>) -> bool>(&self, f: F) -> Option<Resource<I, Untyped>> {
+		self.find_raw(|resource| {
+			&resource;
+			resource.downcast_interface().map(|resource| f(resource)).unwrap_or(false)
+		}).and_then(|resource| resource.downcast_interface())
+	}
+
+	pub fn find_raw<F: Fn(Resource<Anonymous, Untyped>) -> bool>(&self, f: F) -> Option<Resource<Anonymous, Untyped>> {
 		self.objects.borrow().find(|object| {
 			let resource = Resource::new_anonymous(self.handle(), object.handle());
 			f(resource)
@@ -216,14 +230,26 @@ impl Client {
 		})
 	}
 
-	pub fn find_by_id<I: Interface>(&self, id: u32) -> Option<Resource<I>> {
+	pub fn find_by_id<I: Interface, T: 'static>(&self, id: u32) -> Option<Resource<I, T>> {
 		self.find(|resource| {
 			resource.object().get().unwrap().id == id
 		})
 	}
 
-	pub fn find_by_id_anonymous(&self, id: u32) -> Option<Resource<Anonymous>> {
+	pub fn find_by_id_anonymous<T: 'static>(&self, id: u32) -> Option<Resource<Anonymous, T>> {
 		self.find_anonymous(|resource| {
+			resource.object().get().unwrap().id == id
+		})
+	}
+
+	pub fn find_by_id_untyped<I: Interface>(&self, id: u32) -> Option<Resource<I, Untyped>> {
+		self.find_untyped(|resource| {
+			resource.object().get().unwrap().id == id
+		})
+	}
+
+	pub fn find_by_id_raw(&self, id: u32) -> Option<Resource<Anonymous, Untyped>> {
+		self.find_raw(|resource| {
 			resource.object().get().unwrap().id == id
 		})
 	}
@@ -243,24 +269,24 @@ pub struct ClientMap {
 
 // TODO: review possibilites of the handle being null
 impl ClientMap {
-	pub fn try_get_object<I: Interface>(&self, id: u32) -> Option<Resource<I>> {
+	pub fn try_get_object<I: Interface>(&self, id: u32) -> Option<Resource<I, Untyped>> {
 		let client = self.handle.get().expect("Client was destroyed");
-		client.find_by_id(id)
+		client.find_by_id_untyped(id)
 	}
 
-	pub fn try_get_object_anonymous(&self, id: u32) -> Option<Resource<Anonymous>> {
+	pub fn try_get_object_anonymous(&self, id: u32) -> Option<Resource<Anonymous, Untyped>> {
 		let client = self.handle.get().expect("Client was destroyed");
-		client.find_by_id_anonymous(id)
+		client.find_by_id_raw(id)
 	}
 
-	pub fn try_get_id<I>(&self, resource: Resource<I>) -> Result<u32, IntoArgsError> {
+	pub fn try_get_id<I>(&self, resource: Resource<I, Untyped>) -> Result<u32, IntoArgsError> {
 		let anonymous = resource.to_anonymous();
 		anonymous.object().get().map(|object| object.id).ok_or(IntoArgsError::ResourceDoesntExist)
 	}
 
 	pub fn add_new_id<I, R>(&self, id: u32) -> NewResource<I> where R: Message<ClientMap=ClientMap> + fmt::Debug, I: Interface<Request=R> + fmt::Debug + 'static {
 		let client = self.handle.get().expect("Client was destroyed");
-		let object = Object::new::<I, R>(id);
+		let object = Object::new::<I>(id);
 		let object_owner = Owner::new(object);
 		let object_handle = object_owner.handle();
 		client.objects.borrow_mut().add(object_owner);
@@ -284,8 +310,8 @@ impl ClientMap {
 
 pub struct WlDisplayImplementation;
 
-impl ObjectImplementation<WlDisplay> for WlDisplayImplementation {
-    fn handle(&mut self, _state: &mut State, this: Resource<WlDisplay>, request: WlDisplayRequest) {
+impl ObjectImplementation<WlDisplay, ()> for WlDisplayImplementation {
+    fn handle(&mut self, _state: &mut State, this: Resource<WlDisplay, ()>, request: WlDisplayRequest) {
         match request {
 			WlDisplayRequest::Sync(sync) => {
 				let callback = sync.callback.register_fn((), |_, _, _| { }, |_, _| { });
@@ -303,15 +329,15 @@ impl ObjectImplementation<WlDisplay> for WlDisplayImplementation {
 		}
 	}
 	
-	fn handle_destructor(&mut self, _state: &mut State, _this: Resource<WlDisplay>) {
+	fn handle_destructor(&mut self, _state: &mut State, _this: Resource<WlDisplay, ()>) {
 		
 	}
 }
 
 pub struct WlRegistryImplementation;
 
-impl ObjectImplementation<WlRegistry> for WlRegistryImplementation {
-    fn handle(&mut self, _state: &mut State, this: Resource<WlRegistry>, request: WlRegistryRequest) {
+impl ObjectImplementation<WlRegistry, ()> for WlRegistryImplementation {
+    fn handle(&mut self, _state: &mut State, this: Resource<WlRegistry, ()>, request: WlRegistryRequest) {
         match request {
 			WlRegistryRequest::Bind(bind) => {
 				let client = this.client();
@@ -323,7 +349,7 @@ impl ObjectImplementation<WlRegistry> for WlRegistryImplementation {
 		}
 	}
 	
-	fn handle_destructor(&mut self, _state: &mut State, _this: Resource<WlRegistry>) {
+	fn handle_destructor(&mut self, _state: &mut State, _this: Resource<WlRegistry, ()>) {
 		
 	}
 }

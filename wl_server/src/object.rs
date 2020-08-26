@@ -18,7 +18,7 @@ use wl_common::{
 use crate::{
 	server::{State},
 	client::{ClientMap},
-	resource::{Resource, Anonymous},
+	resource::{Resource, Anonymous, Untyped},
 };
 
 #[derive(Debug)]
@@ -74,11 +74,11 @@ pub struct Object {
 }
 
 impl Object {
-	pub fn new<I, R>(id: u32) -> Self where R: Message<ClientMap=ClientMap> + fmt::Debug, I: Interface<Request=R> + fmt::Debug + 'static {
+	pub fn new<I: Interface + 'static>(id: u32) -> Self where I::Request: Message<ClientMap=ClientMap> + fmt::Debug {
 		Self {
 			id,
 			interface: Cell::new(I::as_dyn()),
-			dispatcher: RefCell::new(Some(Dispatcher::null::<I, R>())),
+			dispatcher: RefCell::new(Some(Dispatcher::null::<I>())),
 			data: RefCell::new(Box::new(())),
 			destroy: Cell::new(false),
 		}
@@ -123,8 +123,8 @@ pub(crate) struct Dispatcher {
 }
 
 impl Dispatcher {
-	pub fn new<I: Interface + 'static, T: ObjectImplementation<I> + 'static>(implementation: T) -> Self where I::Request: Message<ClientMap=ClientMap> + fmt::Debug {
-		let raw_obj_implementation: Box<dyn RawObjectImplementation> = Box::new(RawObjectImplementationConcrete::<I> {
+	pub fn new<I: Interface + 'static, T: 'static, Impl: ObjectImplementation<I, T> + 'static>(implementation: Impl) -> Self where I::Request: Message<ClientMap=ClientMap> + fmt::Debug {
+		let raw_obj_implementation: Box<dyn RawObjectImplementation> = Box::new(RawObjectImplementationConcrete::<I, T> {
 			_phantom: std::marker::PhantomData,
 			typed_implementation: Box::new(implementation),
 		});
@@ -134,21 +134,21 @@ impl Dispatcher {
 		}
 	}
 
-	pub fn null<I, R>() -> Self where R: Message<ClientMap=ClientMap> + fmt::Debug, I: Interface<Request=R> + 'static {
+	pub fn null<I: Interface + 'static>() -> Self where I::Request: Message<ClientMap=ClientMap> + fmt::Debug {
 		#[derive(Debug)]
 		struct NullImpl;
 
-		impl<M, I: Interface<Request=M>> ObjectImplementation<I> for NullImpl where M: Message + fmt::Debug {
-			fn handle(&mut self, _state: &mut State, this: Resource<I>, request: I::Request) {
+		impl<I: Interface + 'static> ObjectImplementation<I, ()> for NullImpl where I::Request: Message + fmt::Debug {
+			fn handle(&mut self, _state: &mut State, this: Resource<I, ()>, request: I::Request) {
 				log::debug!("Got unhandled request for {:?}: {:?}", this, request);
 			}
 
-			fn handle_destructor(&mut self, _state: &mut State, this: Resource<I>) {
+			fn handle_destructor(&mut self, _state: &mut State, this: Resource<I, ()>) {
 				log::debug!("Got unhandled destructor ron for {:?}", this);
 			}
 		}
 
-		let implementation = Box::new(RawObjectImplementationConcrete::<I> {
+		let implementation = Box::new(RawObjectImplementationConcrete::<I, ()> {
 			_phantom: std::marker::PhantomData,
 			typed_implementation: Box::new(NullImpl),
 		});
@@ -159,14 +159,14 @@ impl Dispatcher {
 		}
 	}
 
-	pub fn dispatch(&mut self, state: &mut State, this: Resource<Anonymous>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError> {
+	pub fn dispatch(&mut self, state: &mut State, this: Resource<Anonymous, Untyped>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError> {
 		if self.destroyed {
 			return Err(DispatchError::ObjectDestroyed)
 		}
 		self.implementation.dispatch(state, this, opcode, args)
 	}
 
-	pub fn dispatch_destructor(&mut self, state: &mut State, this: Resource<Anonymous>) -> Result<(), DispatchError> {
+	pub fn dispatch_destructor(&mut self, state: &mut State, this: Resource<Anonymous, Untyped>) -> Result<(), DispatchError> {
 		if self.destroyed {
 			return Err(DispatchError::ObjectDestroyed)
 		}
@@ -185,26 +185,26 @@ impl fmt::Debug for Dispatcher {
 }
 
 // TODO: consider passing associated object data in a typed manner to the handler here. Would be nice...
-pub trait ObjectImplementation<I: Interface> {
-	fn handle(&mut self, state: &mut State, this: Resource<I>, request: I::Request);
+pub trait ObjectImplementation<I: Interface, T> {
+	fn handle(&mut self, state: &mut State, this: Resource<I, T>, request: I::Request);
 
-	fn handle_destructor(&mut self, state: &mut State, this: Resource<I>);
+	fn handle_destructor(&mut self, state: &mut State, this: Resource<I, T>);
 }
 
 pub trait RawObjectImplementation {
-	fn dispatch(&mut self, state: &mut State, this: Resource<Anonymous>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError>;
+	fn dispatch(&mut self, state: &mut State, this: Resource<Anonymous, Untyped>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError>;
 
-	fn dispatch_destructor(&mut self, state: &mut State, this: Resource<Anonymous>) -> Result<(), DispatchError>;
+	fn dispatch_destructor(&mut self, state: &mut State, this: Resource<Anonymous, Untyped>) -> Result<(), DispatchError>;
 }
 
-pub struct RawObjectImplementationConcrete<I> {
-	_phantom: std::marker::PhantomData<I>,
-	typed_implementation: Box<dyn ObjectImplementation<I>>,
+pub struct RawObjectImplementationConcrete<I, T> {
+	typed_implementation: Box<dyn ObjectImplementation<I, T>>,
+	_phantom: std::marker::PhantomData<(I, T)>,
 }
 
-impl<I: Interface> RawObjectImplementation for RawObjectImplementationConcrete<I> where I::Request: Message<ClientMap=ClientMap> + fmt::Debug {
-	fn dispatch(&mut self, state: &mut State, this: Resource<Anonymous>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError> {
-		let typed_resource = this.downcast::<I>().ok_or(DispatchError::TypeMismatch)?;
+impl<I: Interface, T: 'static> RawObjectImplementation for RawObjectImplementationConcrete<I, T> where I::Request: Message<ClientMap=ClientMap> + fmt::Debug {
+	fn dispatch(&mut self, state: &mut State, this: Resource<Anonymous, Untyped>, opcode: u16, args: Vec<DynArgument>) -> Result<(), DispatchError> {
+		let resource = this.downcast_both::<I, T>().ok_or(DispatchError::TypeMismatch)?;
 		let client_map = this.client().get().unwrap().client_map();
 		let request = I::Request::from_args(client_map, opcode, args)?;
 
@@ -212,13 +212,13 @@ impl<I: Interface> RawObjectImplementation for RawObjectImplementationConcrete<I
 			log::debug!("{:?} {:?}", this, request);
 		}
 
-		self.typed_implementation.handle(state, typed_resource, request);
+		self.typed_implementation.handle(state, resource, request);
 		Ok(())
 	}
 
-	fn dispatch_destructor(&mut self, state: &mut State, this: Resource<Anonymous>) -> Result<(), DispatchError> {
-		let typed_resource = this.downcast::<I>().ok_or(DispatchError::TypeMismatch)?;
-		self.typed_implementation.handle_destructor(state, typed_resource);
+	fn dispatch_destructor(&mut self, state: &mut State, this: Resource<Anonymous, Untyped>) -> Result<(), DispatchError> {
+		let resource = this.downcast_both::<I, T>().ok_or(DispatchError::TypeMismatch)?;
+		self.typed_implementation.handle_destructor(state, resource);
 		Ok(())
 	}
 }

@@ -168,9 +168,9 @@ fn generate_argument_type(argument: &ArgumentDesc) -> TokenStream {
 				quote!(Anonymous)
 			};
 			if argument.allow_null {
-				quote!(Option<Resource<#interface>>)
+				quote!(Option<Resource<#interface, Untyped>>)
 			} else {
-				quote!(Resource<#interface>)
+				quote!(Resource<#interface, Untyped>)
 			}
 		},
 	    ArgumentType::NewId => {
